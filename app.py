@@ -280,7 +280,7 @@ with tab2:
     if cols:
         disp_ratio = disp_ratio[cols]
     st.dataframe(
-        disp_ratio.style.format("{:.2f}").background_gradient(cmap="Blues", axis=1),
+        disp_ratio.style.format("{:.2f}"),
         use_container_width=True, height=430,
     )
 
