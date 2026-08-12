@@ -217,7 +217,7 @@ tab1, tab2, tab3, tab4 = st.tabs(["📊 용도별 공급량", "📋 구성비 �
 # ──────────────────────────────────────────────
 with tab1:
 
-    # ① 용도별 합계 내림차순 정렬 후 reversed()로 add_trace → 많은 것이 하단
+    # ① 용도별 합계 내림차순 → 첫번째 add_trace가 하단이므로 많은 것 먼저
     usage_total = result.groupby("용도")["공급량_GJ"].sum()
     usage_sorted = usage_total.sort_values(ascending=False).index.tolist()
     usage_sorted = [u for u in usage_sorted if u in result["용도"].unique()]
@@ -237,10 +237,10 @@ with tab1:
         [usage_sorted]
     )
 
-    # ─ 연도별 누적 막대 차트
+    # ─ 연도별 누적 막대 차트 (많은 것 먼저 add → 하단에 위치)
     st.markdown('<div class="sub">📊 연도별 용도별 공급량 (GJ)</div>', unsafe_allow_html=True)
     fig_yr = go.Figure()
-    for usage in reversed(usage_sorted):   # 내림차순 reversed → 많은 것 마지막 add → 하단
+    for usage in usage_sorted:   # 내림차순 그대로 → 많은 것 첫번째 add → 하단
         fig_yr.add_trace(go.Bar(
             x=pivot_year.index.astype(str),
             y=pivot_year[usage],
@@ -251,7 +251,7 @@ with tab1:
     fig_yr.update_layout(
         barmode="stack", height=430,
         xaxis_title="연도", yaxis_title="공급량 (GJ)",
-        legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0, traceorder="normal"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0, traceorder="reversed"),
         plot_bgcolor="white", paper_bgcolor="white",
         margin=dict(l=70,r=20,t=70,b=40),
     )
@@ -261,7 +261,7 @@ with tab1:
     # ─ 월별 누적 막대 차트
     st.markdown('<div class="sub">📊 월별 용도별 공급량 (GJ)</div>', unsafe_allow_html=True)
     fig_mo = go.Figure()
-    for usage in reversed(usage_sorted):
+    for usage in usage_sorted:   # 내림차순 그대로 → 많은 것 첫번째 add → 하단
         fig_mo.add_trace(go.Bar(
             x=pivot.index,
             y=pivot[usage],
