@@ -553,7 +553,7 @@ with tab4:
         tbl_cmp.style
             .format({"구방식_GJ": "{:,.1f}", "신방식_GJ": "{:,.1f}",
                      "차이_GJ": "{:,.1f}", "차이(%)": "{:+.2f}%"})
-            .applymap(color_pct, subset=["차이(%)"]),
+            .map(color_pct, subset=["차이(%)"]),
         use_container_width=True,
     )
 
