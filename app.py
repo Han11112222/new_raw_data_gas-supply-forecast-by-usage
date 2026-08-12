@@ -513,8 +513,9 @@ with tab4:
     )
     st.plotly_chart(fig_cmp_yr, use_container_width=True)
 
-    # ─ 월별 추이 라인 차트
+    # ─ 월별 추이 라인 차트 (스크롤 줌 활성화)
     st.markdown(f'<div class="sub">📈 월별 추이 비교 — {selected_usage} (GJ)</div>', unsafe_allow_html=True)
+    st.caption("💡 마우스 스크롤로 확대/축소 가능")
     fig_cmp_mo = go.Figure()
     fig_cmp_mo.add_trace(go.Scatter(
         x=old_usage.index, y=old_usage.values,
@@ -531,9 +532,100 @@ with tab4:
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         plot_bgcolor="white", paper_bgcolor="white",
         margin=dict(l=70, r=20, t=50, b=40),
+        xaxis=dict(rangeslider=dict(visible=False)),
+        # 스크롤 줌 활성화
+        dragmode="zoom",
     )
     fig_cmp_mo.update_yaxes(showgrid=True, gridcolor="#ebebeb")
-    st.plotly_chart(fig_cmp_mo, use_container_width=True)
+    fig_cmp_mo.update_xaxes(fixedrange=False)
+    fig_cmp_mo.update_yaxes(fixedrange=False)
+    st.plotly_chart(fig_cmp_mo, use_container_width=True,
+                    config={"scrollZoom": True, "displayModeBar": True})
+
+    st.markdown("---")
+
+    # ─ 특정 연도 선택 → 1~12월 막대 비교
+    st.markdown(f'<div class="sub">📊 특정 연도 월별 비교 — {selected_usage} (GJ)</div>', unsafe_allow_html=True)
+
+    avail_years = sorted(set(old_usage.index.year) & set(new_usage.index.year))
+    sel_year = st.selectbox(
+        "연도 선택",
+        options=avail_years,
+        index=len(avail_years) - 1,   # 기본값: 가장 최근 연도
+        key="sel_year_monthly",
+    )
+
+    MONTH_KR = ["1월","2월","3월","4월","5월","6월",
+                 "7월","8월","9월","10월","11월","12월"]
+
+    old_mo = old_usage[old_usage.index.year == sel_year].copy()
+    new_mo = new_usage[new_usage.index.year == sel_year].copy()
+    old_mo.index = old_mo.index.month
+    new_mo.index = new_mo.index.month
+
+    old_mo_vals = [old_mo.get(m, 0) for m in range(1, 13)]
+    new_mo_vals = [new_mo.get(m, 0) for m in range(1, 13)]
+
+    # 월별 % 차이
+    mo_pct = []
+    for o, n in zip(old_mo_vals, new_mo_vals):
+        mo_pct.append((n - o) / o * 100 if o else 0.0)
+
+    max_mo = max(max(old_mo_vals), max(new_mo_vals)) if old_mo_vals else 1
+
+    fig_mo_yr = go.Figure()
+    fig_mo_yr.add_trace(go.Bar(
+        x=MONTH_KR, y=old_mo_vals,
+        name="구방식 (상품별 실적)", marker_color="#2c5f8a",
+        hovertemplate="구방식<br>%{x}<br>%{y:,.0f} GJ<extra></extra>",
+    ))
+    fig_mo_yr.add_trace(go.Bar(
+        x=MONTH_KR, y=new_mo_vals,
+        name="신방식 (구성비 적용)", marker_color="#e8501a",
+        hovertemplate="신방식<br>%{x}<br>%{y:,.0f} GJ<extra></extra>",
+    ))
+
+    # 신방식 막대 상단 % 표기
+    mo_annotations = []
+    for i, (m, pct, nv) in enumerate(zip(MONTH_KR, mo_pct, new_mo_vals)):
+        sign  = "+" if pct >= 0 else ""
+        color = "#e8501a" if pct >= 0 else "#2c5f8a"
+        mo_annotations.append(dict(
+            x=m, y=nv + max_mo * 0.02,
+            text=f"<b>{sign}{pct:.1f}%</b>",
+            showarrow=False,
+            font=dict(size=13, color=color),
+            xanchor="center", yanchor="bottom",
+            xref="x", yref="y",
+        ))
+
+    fig_mo_yr.update_layout(
+        barmode="group", height=420,
+        title=dict(text=f"{sel_year}년 월별 비교 — {selected_usage}", font=dict(size=15)),
+        xaxis_title="월", yaxis_title="공급량 (GJ)",
+        yaxis=dict(range=[0, max_mo * 1.18], showgrid=True, gridcolor="#ebebeb"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=70, r=20, t=80, b=40),
+        annotations=mo_annotations,
+    )
+    st.plotly_chart(fig_mo_yr, use_container_width=True)
+
+    # 월별 테이블
+    tbl_mo_yr = pd.DataFrame({
+        "구방식_GJ": old_mo_vals,
+        "신방식_GJ": new_mo_vals,
+        "차이_GJ":   [n - o for o, n in zip(old_mo_vals, new_mo_vals)],
+        "차이(%)":   mo_pct,
+    }, index=MONTH_KR)
+    tbl_mo_yr.index.name = "월"
+    st.dataframe(
+        tbl_mo_yr.style
+            .format({"구방식_GJ": "{:,.1f}", "신방식_GJ": "{:,.1f}",
+                     "차이_GJ": "{:,.1f}", "차이(%)": "{:+.2f}%"})
+            .map(color_pct, subset=["차이(%)"]),
+        use_container_width=True,
+    )
 
     # ─ 연도별 비교 테이블
     st.markdown(f'<div class="sub">📋 연도별 비교 테이블 — {selected_usage}</div>', unsafe_allow_html=True)
