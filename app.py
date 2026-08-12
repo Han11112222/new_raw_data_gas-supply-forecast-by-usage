@@ -496,7 +496,7 @@ with tab4:
             x=str(y), y=nv + max_val * 0.02,
             text=f"<b>{sign}{pct:.1f}%</b>",
             showarrow=False,
-            font=dict(size=11, color=color),
+            font=dict(size=22, color=color),
             xanchor="center", yanchor="bottom",
             # 신방식 막대(오른쪽)에 표시하기 위해 x축 오프셋
             xref="x", yref="y",
