@@ -185,25 +185,31 @@ tab1, tab2, tab3 = st.tabs(["📊 용도별 공급량", "📋 구성비 확인",
 # ──────────────────────────────────────────────
 with tab1:
 
-    # ① 월별 피벗 테이블
+    # ① 용도별 평균 공급량 기준으로 내림차순 정렬 (차트 하단 = 많은 것)
+    usage_total = result.groupby("용도")["공급량_GJ"].sum()
+    usage_sorted = usage_total.sort_values(ascending=False).index.tolist()
+    # 엑셀에 없는 용도 제외
+    usage_sorted = [u for u in usage_sorted if u in result["용도"].unique()]
+
+    # ② 월별 피벗 (정렬 순서 적용)
     pivot = (
         result.pivot_table(index="연월", columns="용도", values="공급량_GJ", aggfunc="sum")
         .fillna(0)
-        [[u for u in usage_order if u in result["용도"].unique()]]
+        [usage_sorted]
     )
 
-    # ② 연도별 피벗 테이블
+    # ③ 연도별 피벗 (정렬 순서 적용)
     result["연도"] = result["연월"].dt.year
     pivot_year = (
         result.groupby(["연도","용도"])["공급량_GJ"]
         .sum().unstack("용도").fillna(0)
-        [[u for u in usage_order if u in result["용도"].unique()]]
+        [usage_sorted]
     )
 
-    # ─ 연도별 누적 막대 차트
+    # ─ 연도별 누적 막대 차트 (많은 용도가 하단)
     st.markdown('<div class="sub">📊 연도별 용도별 공급량 (GJ)</div>', unsafe_allow_html=True)
     fig_yr = go.Figure()
-    for usage in pivot_year.columns:
+    for usage in reversed(usage_sorted):   # reversed → 많은 것이 하단에 쌓임
         fig_yr.add_trace(go.Bar(
             x=pivot_year.index.astype(str),
             y=pivot_year[usage],
@@ -214,17 +220,17 @@ with tab1:
     fig_yr.update_layout(
         barmode="stack", height=430,
         xaxis_title="연도", yaxis_title="공급량 (GJ)",
-        legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0),
+        legend=dict(orientation="h", yanchor="bottom", y=1.01, x=0, traceorder="reversed"),
         plot_bgcolor="white", paper_bgcolor="white",
-        margin=dict(l=70,r=20,t=60,b=40),
+        margin=dict(l=70,r=20,t=70,b=40),
     )
     fig_yr.update_yaxes(showgrid=True, gridcolor="#ebebeb")
     st.plotly_chart(fig_yr, use_container_width=True)
 
-    # ─ 월별 누적 막대 차트
+    # ─ 월별 누적 막대 차트 (많은 용도가 하단)
     st.markdown('<div class="sub">📊 월별 용도별 공급량 (GJ)</div>', unsafe_allow_html=True)
     fig_mo = go.Figure()
-    for usage in pivot.columns:
+    for usage in reversed(usage_sorted):
         fig_mo.add_trace(go.Bar(
             x=pivot.index,
             y=pivot[usage],
@@ -242,30 +248,42 @@ with tab1:
     fig_mo.update_yaxes(showgrid=True, gridcolor="#ebebeb")
     st.plotly_chart(fig_mo, use_container_width=True)
 
-    # ─ 연도별 테이블
+    # ─ 연도별 테이블 + 다운로드
     st.markdown('<div class="sub">📋 연도별 용도별 공급량 테이블 (GJ)</div>', unsafe_allow_html=True)
-    tbl_yr = pivot_year.copy().round(1)
+    tbl_yr = pivot_year[usage_sorted].copy().round(1)
     tbl_yr.index = tbl_yr.index.astype(str)
     tbl_yr["합계"] = tbl_yr.sum(axis=1)
     st.dataframe(tbl_yr.style.format("{:,.1f}"), use_container_width=True)
 
-    # ─ 월별 테이블
+    buf_yr = BytesIO()
+    with pd.ExcelWriter(buf_yr, engine="openpyxl") as w:
+        tbl_yr.to_excel(w, sheet_name="연도별")
+    st.download_button(
+        "⬇️ 연도별 공급량 엑셀 다운로드",
+        data=buf_yr.getvalue(),
+        file_name=f"연도별_용도별공급량_{y_start}_{y_end}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_yr",
+    )
+
+    st.markdown("---")
+
+    # ─ 월별 테이블 + 다운로드
     st.markdown('<div class="sub">📋 월별 용도별 공급량 테이블 (GJ)</div>', unsafe_allow_html=True)
-    tbl_mo = pivot.copy().round(1)
+    tbl_mo = pivot[usage_sorted].copy().round(1)
     tbl_mo.index = tbl_mo.index.strftime("%Y-%m")
     tbl_mo["합계"] = tbl_mo.sum(axis=1)
-    st.dataframe(tbl_mo.style.format("{:,.1f}"), use_container_width=True, height=320)
+    st.dataframe(tbl_mo.style.format("{:,.1f}"), use_container_width=True, height=340)
 
-    # ─ 엑셀 다운로드
-    buf = BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as w:
-        tbl_yr.to_excel(w, sheet_name="연도별")
+    buf_mo = BytesIO()
+    with pd.ExcelWriter(buf_mo, engine="openpyxl") as w:
         tbl_mo.to_excel(w, sheet_name="월별")
     st.download_button(
-        "⬇️ 엑셀 다운로드 (연도별 + 월별)",
-        data=buf.getvalue(),
-        file_name=f"용도별공급량_{y_start}_{y_end}.xlsx",
+        "⬇️ 월별 공급량 엑셀 다운로드",
+        data=buf_mo.getvalue(),
+        file_name=f"월별_용도별공급량_{y_start}_{y_end}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_mo",
     )
 
 # ──────────────────────────────────────────────
@@ -275,13 +293,23 @@ with tab2:
     st.markdown('<div class="sub">📋 용도별 구성비 원본 (%)</div>', unsafe_allow_html=True)
     disp_ratio = ratio_df.copy()
     disp_ratio.columns = disp_ratio.columns.strftime("%Y-%m")
-    # 기간 필터
     cols = [c for c in disp_ratio.columns if y_start <= int(c[:4]) <= y_end]
     if cols:
         disp_ratio = disp_ratio[cols]
     st.dataframe(
         disp_ratio.style.format("{:.2f}"),
         use_container_width=True, height=430,
+    )
+
+    buf_ratio = BytesIO()
+    with pd.ExcelWriter(buf_ratio, engine="openpyxl") as w:
+        disp_ratio.to_excel(w, sheet_name="구성비")
+    st.download_button(
+        "⬇️ 구성비 엑셀 다운로드",
+        data=buf_ratio.getvalue(),
+        file_name=f"용도별구성비_{y_start}_{y_end}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_ratio",
     )
 
 # ──────────────────────────────────────────────
@@ -293,3 +321,14 @@ with tab3:
     disp_sup["연월"] = disp_sup["연월"].dt.strftime("%Y-%m")
     disp_sup["총공급량_GJ"] = disp_sup["총공급량_GJ"].round(1)
     st.dataframe(disp_sup.style.format({"총공급량_GJ":"{:,.1f}"}), use_container_width=True, height=400)
+
+    buf_sup = BytesIO()
+    with pd.ExcelWriter(buf_sup, engine="openpyxl") as w:
+        disp_sup.to_excel(w, sheet_name="월별공급량", index=False)
+    st.download_button(
+        "⬇️ 월별 총공급량 엑셀 다운로드",
+        data=buf_sup.getvalue(),
+        file_name=f"월별총공급량_{y_start}_{y_end}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_sup",
+    )
