@@ -161,8 +161,8 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("#### 📅 조회 기간")
     c1, c2 = st.columns(2)
-    y_start = c1.number_input("시작", 2014, 2030, 2016)
-    y_end   = c2.number_input("종료", 2014, 2030, 2026)
+    y_start = c1.number_input("시작", 2014, 2030, 2017)
+    y_end   = c2.number_input("종료", 2014, 2030, 2025)
 
 # ──────────────────────────────────────────────
 # 메인
@@ -368,13 +368,12 @@ with tab3:
 # TAB 4 : 구방식 vs 신방식 비교
 # ──────────────────────────────────────────────
 
-# 구방식 컬럼 → 신방식 용도 매핑
 OLD_COL_MAP = {
     "취사용":        ["취사용"],
     "개별난방용":    ["개별난방용"],
     "중앙난방용":    ["중앙난방용"],
     "자가열전용":    ["자가열전용"],
-    "일반용":        ["영업용", "일반용(1)", "일반용(2)"],   # ← 핵심 매핑
+    "일반용":        ["영업용", "일반용(1)", "일반용(2)"],
     "냉난방공조용":  ["냉난방용"],
     "업무난방용":    ["업무난방용"],
     "산업용":        ["산업용"],
@@ -385,164 +384,186 @@ OLD_COL_MAP = {
     "주한미군":      ["주한미군"],
 }
 
+GITHUB_OLD_URL = "https://raw.githubusercontent.com/Han11112222/new_raw_data_gas-supply-forecast-by-usage/main/상품별공급량_MJ실적.xlsx"
+
 def load_old_supply(file) -> pd.DataFrame:
-    """
-    상품별공급량_MJ실적.xlsx → 신방식 용도명으로 월별 GJ 합산
-    단위: MJ → GJ (÷1,000)
-    """
     df = pd.read_excel(file, sheet_name="공급량_실적", header=0)
     df["날짜"] = pd.to_datetime(df["날짜"], errors="coerce")
     df = df.dropna(subset=["날짜"])
     df["연월"] = df["날짜"].dt.to_period("M").dt.to_timestamp()
-
     rows = []
     for _, r in df.iterrows():
         for new_usage, old_cols in OLD_COL_MAP.items():
             val = sum(
-                pd.to_numeric(str(r[c]).replace(",",""), errors="coerce") or 0
+                pd.to_numeric(str(r[c]).replace(",", ""), errors="coerce") or 0
                 for c in old_cols if c in df.columns
             )
             rows.append({"연월": r["연월"], "용도": new_usage, "공급량_GJ": val / 1_000})
+    res = pd.DataFrame(rows)
+    return res.groupby(["연월", "용도"])["공급량_GJ"].sum().reset_index()
 
-    result = pd.DataFrame(rows)
-    return result.groupby(["연월","용도"])["공급량_GJ"].sum().reset_index()
-
+@st.cache_data(ttl=3600)
+def load_old_from_github() -> tuple:
+    try:
+        resp = requests.get(GITHUB_OLD_URL, timeout=15)
+        resp.raise_for_status()
+        return load_old_supply(BytesIO(resp.content)), None
+    except Exception as e:
+        return None, str(e)
 
 with tab4:
-    if uploaded_old is None:
-        st.info("👈 사이드바에서 **상품별공급량_MJ실적.xlsx** 파일을 업로드하면 비교 분석이 시작됩니다.")
-    else:
+    st.markdown('<div class="sub">🔍 구방식 vs 신방식 — 용도별 비교</div>', unsafe_allow_html=True)
+    st.caption("구방식: 상품별공급량 실적 파일 | 신방식: 총공급량 × 구성비")
+
+    # ── 구방식 데이터 로드 (업로드 우선, 없으면 GitHub)
+    if uploaded_old is not None:
         try:
             old_df = load_old_supply(uploaded_old)
+            st.sidebar.success("✅ 구방식 파일: 업로드 사용")
         except Exception as e:
             st.error(f"파일 파싱 오류: {e}")
             st.stop()
+    else:
+        old_df, old_err = load_old_from_github()
+        if old_df is None:
+            st.error(f"구방식 파일 GitHub 로드 실패: {old_err}")
+            st.info("👈 사이드바에서 상품별공급량_MJ실적.xlsx 를 직접 업로드해 주세요.")
+            st.stop()
+        st.sidebar.info("📡 구방식 파일: GitHub 자동 사용")
 
-        # 기간 필터
-        old_filtered = old_df[
-            (old_df["연월"].dt.year >= y_start) &
-            (old_df["연월"].dt.year <= y_end)
-        ].copy()
+    # ── 비교 기간 고정: 2017~2025
+    CMP_START, CMP_END = 2017, 2025
 
-        # 신방식: result (이미 계산됨)
-        new_filtered = result[
-            (result["연월"].dt.year >= y_start) &
-            (result["연월"].dt.year <= y_end)
-        ].copy()
+    old_filtered = old_df[
+        (old_df["연월"].dt.year >= CMP_START) &
+        (old_df["연월"].dt.year <= CMP_END)
+    ].copy()
+    new_filtered = result[
+        (result["연월"].dt.year >= CMP_START) &
+        (result["연월"].dt.year <= CMP_END)
+    ].copy()
 
-        # 비교 가능한 공통 용도
-        common_usages = [u for u in OLD_COL_MAP.keys() if u in new_filtered["용도"].unique()]
+    common_usages = [u for u in OLD_COL_MAP.keys() if u in new_filtered["용도"].unique()]
 
-        st.markdown('<div class="sub">🔍 구방식 vs 신방식 — 용도 선택 후 비교</div>', unsafe_allow_html=True)
-        st.caption("구방식: 상품별공급량 실적 파일 기준 | 신방식: 총공급량 × 구성비 기준")
+    selected_usage = st.selectbox(
+        "비교할 용도 선택",
+        options=common_usages,
+        index=common_usages.index("일반용") if "일반용" in common_usages else 0,
+    )
 
-        # 용도 선택 버튼
-        selected_usage = st.selectbox(
-            "비교할 용도 선택",
-            options=common_usages,
-            index=common_usages.index("일반용") if "일반용" in common_usages else 0,
-        )
+    # ── 데이터 추출
+    old_usage = old_filtered[old_filtered["용도"] == selected_usage].set_index("연월")["공급량_GJ"]
+    new_usage = new_filtered[new_filtered["용도"] == selected_usage].set_index("연월")["공급량_GJ"]
 
-        # 데이터 추출
-        old_usage = old_filtered[old_filtered["용도"] == selected_usage].set_index("연월")["공급량_GJ"]
-        new_usage = new_filtered[new_filtered["용도"] == selected_usage].set_index("연월")["공급량_GJ"]
+    old_yr = old_usage.groupby(old_usage.index.year).sum()
+    new_yr = new_usage.groupby(new_usage.index.year).sum()
+    years  = sorted(set(old_yr.index) | set(new_yr.index))
 
-        # 연도별 합산
-        old_yr = old_usage.groupby(old_usage.index.year).sum()
-        new_yr = new_usage.groupby(new_usage.index.year).sum()
+    old_vals = [old_yr.get(y, 0) for y in years]
+    new_vals = [new_yr.get(y, 0) for y in years]
 
-        # ─ 연도별 비교 막대 차트
-        st.markdown(f'<div class="sub">📊 연도별 비교 — {selected_usage} (GJ)</div>', unsafe_allow_html=True)
-        years = sorted(set(old_yr.index) | set(new_yr.index))
-        fig_cmp_yr = go.Figure()
-        fig_cmp_yr.add_trace(go.Bar(
-            x=[str(y) for y in years],
-            y=[old_yr.get(y, 0) for y in years],
-            name="구방식 (상품별 실적)",
-            marker_color="#2c5f8a",
-            hovertemplate="구방식<br>%{x}년<br>%{y:,.0f} GJ<extra></extra>",
+    # % 차이 계산
+    pct_list = []
+    for o, n in zip(old_vals, new_vals):
+        if o and o != 0:
+            pct_list.append((n - o) / o * 100)
+        else:
+            pct_list.append(0.0)
+
+    # ─ 연도별 비교 막대 + % annotation
+    st.markdown(f'<div class="sub">📊 연도별 비교 — {selected_usage} (GJ) · 막대 상단: 신방식 차이(%)</div>', unsafe_allow_html=True)
+
+    max_val = max(max(old_vals), max(new_vals)) if old_vals and new_vals else 1
+    fig_cmp_yr = go.Figure()
+
+    fig_cmp_yr.add_trace(go.Bar(
+        x=[str(y) for y in years], y=old_vals,
+        name="구방식 (상품별 실적)", marker_color="#2c5f8a",
+        hovertemplate="구방식<br>%{x}년<br>%{y:,.0f} GJ<extra></extra>",
+    ))
+    fig_cmp_yr.add_trace(go.Bar(
+        x=[str(y) for y in years], y=new_vals,
+        name="신방식 (구성비 적용)", marker_color="#e8501a",
+        hovertemplate="신방식<br>%{x}년<br>%{y:,.0f} GJ<extra></extra>",
+    ))
+
+    # 신방식 막대 상단에 % 표기
+    annotations = []
+    for i, (y, pct, nv) in enumerate(zip(years, pct_list, new_vals)):
+        sign  = "+" if pct >= 0 else ""
+        color = "#e8501a" if pct >= 0 else "#2c5f8a"
+        annotations.append(dict(
+            x=str(y), y=nv + max_val * 0.02,
+            text=f"<b>{sign}{pct:.1f}%</b>",
+            showarrow=False,
+            font=dict(size=11, color=color),
+            xanchor="center", yanchor="bottom",
+            # 신방식 막대(오른쪽)에 표시하기 위해 x축 오프셋
+            xref="x", yref="y",
         ))
-        fig_cmp_yr.add_trace(go.Bar(
-            x=[str(y) for y in years],
-            y=[new_yr.get(y, 0) for y in years],
-            name="신방식 (구성비 적용)",
-            marker_color="#e8501a",
-            hovertemplate="신방식<br>%{x}년<br>%{y:,.0f} GJ<extra></extra>",
-        ))
-        fig_cmp_yr.update_layout(
-            barmode="group", height=400,
-            xaxis_title="연도", yaxis_title="공급량 (GJ)",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02),
-            plot_bgcolor="white", paper_bgcolor="white",
-            margin=dict(l=70,r=20,t=60,b=40),
-        )
-        fig_cmp_yr.update_yaxes(showgrid=True, gridcolor="#ebebeb")
-        st.plotly_chart(fig_cmp_yr, use_container_width=True)
 
-        # ─ 월별 비교 라인 차트
-        st.markdown(f'<div class="sub">📈 월별 추이 비교 — {selected_usage} (GJ)</div>', unsafe_allow_html=True)
-        fig_cmp_mo = go.Figure()
-        fig_cmp_mo.add_trace(go.Scatter(
-            x=old_usage.index, y=old_usage.values,
-            name="구방식 (상품별 실적)",
-            mode="lines", line=dict(color="#2c5f8a", width=2),
-            hovertemplate="구방식<br>%{x|%Y-%m}<br>%{y:,.0f} GJ<extra></extra>",
-        ))
-        fig_cmp_mo.add_trace(go.Scatter(
-            x=new_usage.index, y=new_usage.values,
-            name="신방식 (구성비 적용)",
-            mode="lines", line=dict(color="#e8501a", width=2, dash="dot"),
-            hovertemplate="신방식<br>%{x|%Y-%m}<br>%{y:,.0f} GJ<extra></extra>",
-        ))
-        fig_cmp_mo.update_layout(
-            height=380, xaxis_title="연월", yaxis_title="공급량 (GJ)",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02),
-            plot_bgcolor="white", paper_bgcolor="white",
-            margin=dict(l=70,r=20,t=60,b=40),
-        )
-        fig_cmp_mo.update_yaxes(showgrid=True, gridcolor="#ebebeb")
-        st.plotly_chart(fig_cmp_mo, use_container_width=True)
+    fig_cmp_yr.update_layout(
+        barmode="group", height=460,
+        xaxis_title="연도", yaxis_title="공급량 (GJ)",
+        yaxis=dict(range=[0, max_val * 1.15], showgrid=True, gridcolor="#ebebeb"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=70, r=20, t=70, b=40),
+        annotations=annotations,
+    )
+    st.plotly_chart(fig_cmp_yr, use_container_width=True)
 
-        # ─ 차이(신-구) 라인 차트
-        st.markdown(f'<div class="sub">📉 차이 (신방식 − 구방식) — {selected_usage} (GJ)</div>', unsafe_allow_html=True)
-        diff = new_usage.subtract(old_usage, fill_value=0).sort_index()
-        colors = ["#e8501a" if v >= 0 else "#2c5f8a" for v in diff.values]
-        fig_diff = go.Figure()
-        fig_diff.add_trace(go.Bar(
-            x=diff.index, y=diff.values,
-            marker_color=colors,
-            hovertemplate="%{x|%Y-%m}<br>차이: %{y:,.0f} GJ<extra></extra>",
-            name="차이 (신-구)",
-        ))
-        fig_diff.add_hline(y=0, line_dash="dash", line_color="#999")
-        fig_diff.update_layout(
-            height=300, xaxis_title="연월", yaxis_title="차이 (GJ)",
-            plot_bgcolor="white", paper_bgcolor="white",
-            margin=dict(l=70,r=20,t=30,b=40),
-            showlegend=False,
-        )
-        fig_diff.update_yaxes(showgrid=True, gridcolor="#ebebeb")
-        st.plotly_chart(fig_diff, use_container_width=True)
+    # ─ 월별 추이 라인 차트
+    st.markdown(f'<div class="sub">📈 월별 추이 비교 — {selected_usage} (GJ)</div>', unsafe_allow_html=True)
+    fig_cmp_mo = go.Figure()
+    fig_cmp_mo.add_trace(go.Scatter(
+        x=old_usage.index, y=old_usage.values,
+        name="구방식", mode="lines", line=dict(color="#2c5f8a", width=2),
+        hovertemplate="구방식<br>%{x|%Y-%m}<br>%{y:,.0f} GJ<extra></extra>",
+    ))
+    fig_cmp_mo.add_trace(go.Scatter(
+        x=new_usage.index, y=new_usage.values,
+        name="신방식", mode="lines", line=dict(color="#e8501a", width=2, dash="dot"),
+        hovertemplate="신방식<br>%{x|%Y-%m}<br>%{y:,.0f} GJ<extra></extra>",
+    ))
+    fig_cmp_mo.update_layout(
+        height=360, xaxis_title="연월", yaxis_title="공급량 (GJ)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=70, r=20, t=50, b=40),
+    )
+    fig_cmp_mo.update_yaxes(showgrid=True, gridcolor="#ebebeb")
+    st.plotly_chart(fig_cmp_mo, use_container_width=True)
 
-        # ─ 연도별 비교 테이블
-        st.markdown(f'<div class="sub">📋 연도별 비교 테이블 — {selected_usage}</div>', unsafe_allow_html=True)
-        tbl_cmp = pd.DataFrame({
-            "구방식_GJ": old_yr,
-            "신방식_GJ": new_yr,
-        }).fillna(0).round(1)
-        tbl_cmp["차이_GJ"] = (tbl_cmp["신방식_GJ"] - tbl_cmp["구방식_GJ"]).round(1)
-        tbl_cmp["차이(%)"] = (tbl_cmp["차이_GJ"] / tbl_cmp["구방식_GJ"].replace(0, float("nan")) * 100).round(2)
-        tbl_cmp.index.name = "연도"
-        st.dataframe(tbl_cmp.style.format("{:,.1f}"), use_container_width=True)
+    # ─ 연도별 비교 테이블
+    st.markdown(f'<div class="sub">📋 연도별 비교 테이블 — {selected_usage}</div>', unsafe_allow_html=True)
+    tbl_cmp = pd.DataFrame({
+        "구방식_GJ": old_yr,
+        "신방식_GJ": new_yr,
+    }).fillna(0).round(1)
+    tbl_cmp["차이_GJ"]  = (tbl_cmp["신방식_GJ"] - tbl_cmp["구방식_GJ"]).round(1)
+    tbl_cmp["차이(%)"]  = (tbl_cmp["차이_GJ"] / tbl_cmp["구방식_GJ"].replace(0, float("nan")) * 100).round(2)
+    tbl_cmp.index.name  = "연도"
 
-        # ─ 다운로드
-        buf_cmp = BytesIO()
-        with pd.ExcelWriter(buf_cmp, engine="openpyxl") as w:
-            tbl_cmp.to_excel(w, sheet_name=f"{selected_usage}_비교")
-        st.download_button(
-            f"⬇️ {selected_usage} 비교 엑셀 다운로드",
-            data=buf_cmp.getvalue(),
-            file_name=f"비교_{selected_usage}_{y_start}_{y_end}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            key="dl_cmp",
-        )
+    def color_pct(val):
+        if pd.isna(val): return ""
+        return "color: #e8501a" if val >= 0 else "color: #2c5f8a"
+
+    st.dataframe(
+        tbl_cmp.style
+            .format({"구방식_GJ": "{:,.1f}", "신방식_GJ": "{:,.1f}",
+                     "차이_GJ": "{:,.1f}", "차이(%)": "{:+.2f}%"})
+            .applymap(color_pct, subset=["차이(%)"]),
+        use_container_width=True,
+    )
+
+    buf_cmp = BytesIO()
+    with pd.ExcelWriter(buf_cmp, engine="openpyxl") as w:
+        tbl_cmp.to_excel(w, sheet_name=f"{selected_usage}_비교")
+    st.download_button(
+        f"⬇️ {selected_usage} 비교 엑셀 다운로드",
+        data=buf_cmp.getvalue(),
+        file_name=f"비교_{selected_usage}_2017_2025.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_cmp",
+    )
