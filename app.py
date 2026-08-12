@@ -66,7 +66,7 @@ GSHEET_ID = "13HrIz6OytYDykXeXzXJ02I6XbaKin1YaKBoO2kBd6Bs"
 GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{GSHEET_ID}/export?format=csv&gid=0"
 
 # GitHub raw URL (구성비 엑셀)
-GITHUB_RATIO_URL = "https://raw.githubusercontent.com/Han11112222/new_raw_data_gas-supply-forecast-by-usage/main/자가소모_및_구성비_정리_260625.xlsx"
+GITHUB_RATIO_URL = "https://raw.githubusercontent.com/Han11112222/new_raw_data_gas-supply-forecast-by-usage/main/ratio_data.xlsx"
 
 # 용도 순서 및 그룹 정의
 USAGE_ORDER = [
