@@ -10,7 +10,7 @@ import requests
 # 페이지 설정
 # ─────────────────────────────────────────────
 st.set_page_config(
-    page_title="도시가스 수급·공급량 용도별 분석",
+    page_title="도시가스 용도별 공급량 예측",
     page_icon="🔥",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -66,7 +66,7 @@ GSHEET_ID = "13HrIz6OytYDykXeXzXJ02I6XbaKin1YaKBoO2kBd6Bs"
 GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{GSHEET_ID}/export?format=csv&gid=0"
 
 # GitHub raw URL (구성비 엑셀)
-GITHUB_RATIO_URL = "https://raw.githubusercontent.com/Han11112222/your-repo/main/자가소모_및_구성비_정리_260625.xlsx"
+GITHUB_RATIO_URL = "https://raw.githubusercontent.com/Han11112222/new_raw_data_gas-supply-forecast-by-usage/main/자가소모_및_구성비_정리_260625.xlsx"
 
 # 용도 순서 및 그룹 정의
 USAGE_ORDER = [
@@ -293,8 +293,8 @@ with st.sidebar:
 # ─────────────────────────────────────────────
 # 메인 헤더
 # ─────────────────────────────────────────────
-st.markdown('<div class="main-title">🔥 도시가스 수급·공급량 용도별 분석</div>', unsafe_allow_html=True)
-st.caption("대성에너지(주) 마케팅본부 | 2016년 1월 ~ 현재 | 월별 용도별 공급량 산출")
+st.markdown('<div class="main-title">🔥 도시가스 용도별 공급량 예측</div>', unsafe_allow_html=True)
+st.caption("대성에너지(주) 마케팅본부 | 공급량 실적(2014~) × 용도별 구성비 → 용도별 월별 예측값 산출")
 
 # ─────────────────────────────────────────────
 # 데이터 로드
