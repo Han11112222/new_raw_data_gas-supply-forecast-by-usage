@@ -151,6 +151,14 @@ with st.sidebar:
         help="업로드하지 않으면 GitHub에 저장된 파일을 자동으로 사용합니다."
     )
     st.markdown("---")
+    st.markdown("#### 📂 구방식 비교 파일")
+    uploaded_old = st.file_uploader(
+        "상품별공급량_MJ실적.xlsx 업로드",
+        type=["xlsx"],
+        key="old_file",
+        help="이전 방식(상품별 실적) 파일을 업로드하면 비교 탭이 활성화됩니다."
+    )
+    st.markdown("---")
     st.markdown("#### 📅 조회 기간")
     c1, c2 = st.columns(2)
     y_start = c1.number_input("시작", 2014, 2030, 2016)
@@ -202,7 +210,7 @@ usage_order = list(ratio_df.index)   # 엑셀 순서 그대로
 # ══════════════════════════════════════════════
 # TAB 구성
 # ══════════════════════════════════════════════
-tab1, tab2, tab3 = st.tabs(["📊 용도별 공급량", "📋 구성비 확인", "🗃️ 원시 데이터"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 용도별 공급량", "📋 구성비 확인", "🗃️ 원시 데이터", "🔍 구방식 vs 신방식 비교"])
 
 # ──────────────────────────────────────────────
 # TAB 1 : 용도별 공급량
@@ -355,3 +363,186 @@ with tab3:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="dl_sup",
     )
+
+# ──────────────────────────────────────────────
+# TAB 4 : 구방식 vs 신방식 비교
+# ──────────────────────────────────────────────
+
+# 구방식 컬럼 → 신방식 용도 매핑
+OLD_COL_MAP = {
+    "취사용":        ["취사용"],
+    "개별난방용":    ["개별난방용"],
+    "중앙난방용":    ["중앙난방용"],
+    "자가열전용":    ["자가열전용"],
+    "일반용":        ["영업용", "일반용(1)", "일반용(2)"],   # ← 핵심 매핑
+    "냉난방공조용":  ["냉난방용"],
+    "업무난방용":    ["업무난방용"],
+    "산업용":        ["산업용"],
+    "수송용":        ["수송용(CNG)", "수송용(BIO)"],
+    "열병합용":      ["열병합용"],
+    "연료전지용":    ["연료전지용"],
+    "열전용설비용":  ["열전용설비용(주택외)"],
+    "주한미군":      ["주한미군"],
+}
+
+def load_old_supply(file) -> pd.DataFrame:
+    """
+    상품별공급량_MJ실적.xlsx → 신방식 용도명으로 월별 GJ 합산
+    단위: MJ → GJ (÷1,000)
+    """
+    df = pd.read_excel(file, sheet_name="공급량_실적", header=0)
+    df["날짜"] = pd.to_datetime(df["날짜"], errors="coerce")
+    df = df.dropna(subset=["날짜"])
+    df["연월"] = df["날짜"].dt.to_period("M").dt.to_timestamp()
+
+    rows = []
+    for _, r in df.iterrows():
+        for new_usage, old_cols in OLD_COL_MAP.items():
+            val = sum(
+                pd.to_numeric(str(r[c]).replace(",",""), errors="coerce") or 0
+                for c in old_cols if c in df.columns
+            )
+            rows.append({"연월": r["연월"], "용도": new_usage, "공급량_GJ": val / 1_000})
+
+    result = pd.DataFrame(rows)
+    return result.groupby(["연월","용도"])["공급량_GJ"].sum().reset_index()
+
+
+with tab4:
+    if uploaded_old is None:
+        st.info("👈 사이드바에서 **상품별공급량_MJ실적.xlsx** 파일을 업로드하면 비교 분석이 시작됩니다.")
+    else:
+        try:
+            old_df = load_old_supply(uploaded_old)
+        except Exception as e:
+            st.error(f"파일 파싱 오류: {e}")
+            st.stop()
+
+        # 기간 필터
+        old_filtered = old_df[
+            (old_df["연월"].dt.year >= y_start) &
+            (old_df["연월"].dt.year <= y_end)
+        ].copy()
+
+        # 신방식: result (이미 계산됨)
+        new_filtered = result[
+            (result["연월"].dt.year >= y_start) &
+            (result["연월"].dt.year <= y_end)
+        ].copy()
+
+        # 비교 가능한 공통 용도
+        common_usages = [u for u in OLD_COL_MAP.keys() if u in new_filtered["용도"].unique()]
+
+        st.markdown('<div class="sub">🔍 구방식 vs 신방식 — 용도 선택 후 비교</div>', unsafe_allow_html=True)
+        st.caption("구방식: 상품별공급량 실적 파일 기준 | 신방식: 총공급량 × 구성비 기준")
+
+        # 용도 선택 버튼
+        selected_usage = st.selectbox(
+            "비교할 용도 선택",
+            options=common_usages,
+            index=common_usages.index("일반용") if "일반용" in common_usages else 0,
+        )
+
+        # 데이터 추출
+        old_usage = old_filtered[old_filtered["용도"] == selected_usage].set_index("연월")["공급량_GJ"]
+        new_usage = new_filtered[new_filtered["용도"] == selected_usage].set_index("연월")["공급량_GJ"]
+
+        # 연도별 합산
+        old_yr = old_usage.groupby(old_usage.index.year).sum()
+        new_yr = new_usage.groupby(new_usage.index.year).sum()
+
+        # ─ 연도별 비교 막대 차트
+        st.markdown(f'<div class="sub">📊 연도별 비교 — {selected_usage} (GJ)</div>', unsafe_allow_html=True)
+        years = sorted(set(old_yr.index) | set(new_yr.index))
+        fig_cmp_yr = go.Figure()
+        fig_cmp_yr.add_trace(go.Bar(
+            x=[str(y) for y in years],
+            y=[old_yr.get(y, 0) for y in years],
+            name="구방식 (상품별 실적)",
+            marker_color="#2c5f8a",
+            hovertemplate="구방식<br>%{x}년<br>%{y:,.0f} GJ<extra></extra>",
+        ))
+        fig_cmp_yr.add_trace(go.Bar(
+            x=[str(y) for y in years],
+            y=[new_yr.get(y, 0) for y in years],
+            name="신방식 (구성비 적용)",
+            marker_color="#e8501a",
+            hovertemplate="신방식<br>%{x}년<br>%{y:,.0f} GJ<extra></extra>",
+        ))
+        fig_cmp_yr.update_layout(
+            barmode="group", height=400,
+            xaxis_title="연도", yaxis_title="공급량 (GJ)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            plot_bgcolor="white", paper_bgcolor="white",
+            margin=dict(l=70,r=20,t=60,b=40),
+        )
+        fig_cmp_yr.update_yaxes(showgrid=True, gridcolor="#ebebeb")
+        st.plotly_chart(fig_cmp_yr, use_container_width=True)
+
+        # ─ 월별 비교 라인 차트
+        st.markdown(f'<div class="sub">📈 월별 추이 비교 — {selected_usage} (GJ)</div>', unsafe_allow_html=True)
+        fig_cmp_mo = go.Figure()
+        fig_cmp_mo.add_trace(go.Scatter(
+            x=old_usage.index, y=old_usage.values,
+            name="구방식 (상품별 실적)",
+            mode="lines", line=dict(color="#2c5f8a", width=2),
+            hovertemplate="구방식<br>%{x|%Y-%m}<br>%{y:,.0f} GJ<extra></extra>",
+        ))
+        fig_cmp_mo.add_trace(go.Scatter(
+            x=new_usage.index, y=new_usage.values,
+            name="신방식 (구성비 적용)",
+            mode="lines", line=dict(color="#e8501a", width=2, dash="dot"),
+            hovertemplate="신방식<br>%{x|%Y-%m}<br>%{y:,.0f} GJ<extra></extra>",
+        ))
+        fig_cmp_mo.update_layout(
+            height=380, xaxis_title="연월", yaxis_title="공급량 (GJ)",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            plot_bgcolor="white", paper_bgcolor="white",
+            margin=dict(l=70,r=20,t=60,b=40),
+        )
+        fig_cmp_mo.update_yaxes(showgrid=True, gridcolor="#ebebeb")
+        st.plotly_chart(fig_cmp_mo, use_container_width=True)
+
+        # ─ 차이(신-구) 라인 차트
+        st.markdown(f'<div class="sub">📉 차이 (신방식 − 구방식) — {selected_usage} (GJ)</div>', unsafe_allow_html=True)
+        diff = new_usage.subtract(old_usage, fill_value=0).sort_index()
+        colors = ["#e8501a" if v >= 0 else "#2c5f8a" for v in diff.values]
+        fig_diff = go.Figure()
+        fig_diff.add_trace(go.Bar(
+            x=diff.index, y=diff.values,
+            marker_color=colors,
+            hovertemplate="%{x|%Y-%m}<br>차이: %{y:,.0f} GJ<extra></extra>",
+            name="차이 (신-구)",
+        ))
+        fig_diff.add_hline(y=0, line_dash="dash", line_color="#999")
+        fig_diff.update_layout(
+            height=300, xaxis_title="연월", yaxis_title="차이 (GJ)",
+            plot_bgcolor="white", paper_bgcolor="white",
+            margin=dict(l=70,r=20,t=30,b=40),
+            showlegend=False,
+        )
+        fig_diff.update_yaxes(showgrid=True, gridcolor="#ebebeb")
+        st.plotly_chart(fig_diff, use_container_width=True)
+
+        # ─ 연도별 비교 테이블
+        st.markdown(f'<div class="sub">📋 연도별 비교 테이블 — {selected_usage}</div>', unsafe_allow_html=True)
+        tbl_cmp = pd.DataFrame({
+            "구방식_GJ": old_yr,
+            "신방식_GJ": new_yr,
+        }).fillna(0).round(1)
+        tbl_cmp["차이_GJ"] = (tbl_cmp["신방식_GJ"] - tbl_cmp["구방식_GJ"]).round(1)
+        tbl_cmp["차이(%)"] = (tbl_cmp["차이_GJ"] / tbl_cmp["구방식_GJ"].replace(0, float("nan")) * 100).round(2)
+        tbl_cmp.index.name = "연도"
+        st.dataframe(tbl_cmp.style.format("{:,.1f}"), use_container_width=True)
+
+        # ─ 다운로드
+        buf_cmp = BytesIO()
+        with pd.ExcelWriter(buf_cmp, engine="openpyxl") as w:
+            tbl_cmp.to_excel(w, sheet_name=f"{selected_usage}_비교")
+        st.download_button(
+            f"⬇️ {selected_usage} 비교 엑셀 다운로드",
+            data=buf_cmp.getvalue(),
+            file_name=f"비교_{selected_usage}_{y_start}_{y_end}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_cmp",
+        )
