@@ -213,7 +213,9 @@ def build_usage_df(monthly_supply: pd.DataFrame, ratio_df: pd.DataFrame, calc_ty
     result_list = []
     for _, row in monthly_supply.iterrows():
         ym = row["연월"]
-        supply_val = row[calc_type]
+        supply_val = row.get(calc_type, None)
+        if supply_val is None or pd.isna(supply_val):
+            continue
 
         # 가장 가까운 구성비 날짜 찾기
         if ym in ratio_df.columns:
@@ -224,7 +226,11 @@ def build_usage_df(monthly_supply: pd.DataFrame, ratio_df: pd.DataFrame, calc_ty
 
         for usage in USAGE_ORDER:
             if usage in ratio_df.index:
-                ratio_val = ratio_df.loc[usage, ratio_col] / 100.0
+                ratio_val = ratio_df.loc[usage, ratio_col]
+                try:
+                    ratio_val = float(ratio_val) / 100.0
+                except Exception:
+                    ratio_val = 0.0
                 amount = supply_val * ratio_val
                 result_list.append({
                     "연월": ym,
@@ -233,6 +239,10 @@ def build_usage_df(monthly_supply: pd.DataFrame, ratio_df: pd.DataFrame, calc_ty
                     "비율(%)": ratio_df.loc[usage, ratio_col],
                     "공급량_GJ": amount,
                 })
+
+    if not result_list:
+        # 빈 경우 컬럼만 있는 빈 DataFrame 반환
+        return pd.DataFrame(columns=["연월", "용도", "그룹", "비율(%)", "공급량_GJ"])
 
     return pd.DataFrame(result_list)
 
@@ -367,7 +377,14 @@ with tab_main:
                 ratio_df,
                 calc_mode
             )
-            usage_df.rename(columns={"공급량_GJ": f"공급량"}, inplace=True)
+            usage_df.rename(columns={"공급량_GJ": "공급량"}, inplace=True)
+
+            # ── 디버그: 매칭 안 될 때 원인 표시
+            if usage_df.empty or "용도" not in usage_df.columns or usage_df["용도"].nunique() == 0:
+                st.error("⚠️ 용도별 데이터 계산 실패: 구성비 파일의 용도명과 매칭이 안 됩니다.")
+                st.write("📋 구성비 파일의 용도 목록:", list(ratio_df.index))
+                st.write("📋 기대하는 용도 목록:", USAGE_ORDER)
+                st.stop()
 
             # 단위 변환
             if unit == "Nm³":
