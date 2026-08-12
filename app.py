@@ -368,6 +368,10 @@ with tab3:
 # TAB 4 : 구방식 vs 신방식 비교
 # ──────────────────────────────────────────────
 
+def color_pct(val):
+    if pd.isna(val): return ""
+    return "color: #e8501a" if val >= 0 else "color: #2c5f8a"
+
 OLD_COL_MAP = {
     "취사용":        ["취사용"],
     "개별난방용":    ["개별난방용"],
@@ -513,9 +517,9 @@ with tab4:
     )
     st.plotly_chart(fig_cmp_yr, use_container_width=True)
 
-    # ─ 월별 추이 라인 차트 (스크롤 줌 활성화)
+    # ─ 월별 추이 라인 차트 (스크롤 줌 + 드래그 이동)
     st.markdown(f'<div class="sub">📈 월별 추이 비교 — {selected_usage} (GJ)</div>', unsafe_allow_html=True)
-    st.caption("💡 마우스 스크롤로 확대/축소 가능")
+    st.caption("💡 마우스 휠: 확대/축소 | 마우스 드래그: 이동")
     fig_cmp_mo = go.Figure()
     fig_cmp_mo.add_trace(go.Scatter(
         x=old_usage.index, y=old_usage.values,
@@ -528,19 +532,24 @@ with tab4:
         hovertemplate="신방식<br>%{x|%Y-%m}<br>%{y:,.0f} GJ<extra></extra>",
     ))
     fig_cmp_mo.update_layout(
-        height=360, xaxis_title="연월", yaxis_title="공급량 (GJ)",
+        height=400, xaxis_title="연월", yaxis_title="공급량 (GJ)",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         plot_bgcolor="white", paper_bgcolor="white",
         margin=dict(l=70, r=20, t=50, b=40),
-        xaxis=dict(rangeslider=dict(visible=False)),
-        # 스크롤 줌 활성화
-        dragmode="zoom",
+        dragmode="pan",   # 기본: 드래그로 이동
     )
-    fig_cmp_mo.update_yaxes(showgrid=True, gridcolor="#ebebeb")
+    fig_cmp_mo.update_yaxes(showgrid=True, gridcolor="#ebebeb", fixedrange=False)
     fig_cmp_mo.update_xaxes(fixedrange=False)
-    fig_cmp_mo.update_yaxes(fixedrange=False)
-    st.plotly_chart(fig_cmp_mo, use_container_width=True,
-                    config={"scrollZoom": True, "displayModeBar": True})
+    st.plotly_chart(
+        fig_cmp_mo,
+        use_container_width=True,
+        config={
+            "scrollZoom": True,       # 마우스 휠 줌
+            "displayModeBar": True,   # 툴바 표시
+            "modeBarButtonsToAdd": ["pan2d"],
+            "modeBarButtonsToRemove": ["lasso2d", "select2d"],
+        }
+    )
 
     st.markdown("---")
 
@@ -551,9 +560,40 @@ with tab4:
     sel_year = st.selectbox(
         "연도 선택",
         options=avail_years,
-        index=len(avail_years) - 1,   # 기본값: 가장 최근 연도
+        index=len(avail_years) - 1,
         key="sel_year_monthly",
     )
+
+    # ── 선택 연도 전체 합계 차이 % 요약 카드
+    old_yr_total = old_yr.get(sel_year, 0)
+    new_yr_total = new_yr.get(sel_year, 0)
+    yr_diff      = new_yr_total - old_yr_total
+    yr_pct       = yr_diff / old_yr_total * 100 if old_yr_total else 0
+    sign_yr      = "+" if yr_pct >= 0 else ""
+    pct_color    = "#e8501a" if yr_pct >= 0 else "#2c5f8a"
+
+    st.markdown(f"""
+    <div style="display:flex; gap:1rem; margin-bottom:1rem;">
+        <div style="flex:1; background:#f4f8fc; border-left:4px solid #2c5f8a;
+                    padding:0.8rem 1.2rem; border-radius:4px;">
+            <div style="font-size:0.8rem; color:#666;">구방식 ({sel_year}년 합계)</div>
+            <div style="font-size:1.3rem; font-weight:700; color:#2c5f8a;">{old_yr_total:,.0f} GJ</div>
+        </div>
+        <div style="flex:1; background:#fff4f0; border-left:4px solid #e8501a;
+                    padding:0.8rem 1.2rem; border-radius:4px;">
+            <div style="font-size:0.8rem; color:#666;">신방식 ({sel_year}년 합계)</div>
+            <div style="font-size:1.3rem; font-weight:700; color:#e8501a;">{new_yr_total:,.0f} GJ</div>
+        </div>
+        <div style="flex:1; background:#f9f9f9; border-left:4px solid {pct_color};
+                    padding:0.8rem 1.2rem; border-radius:4px;">
+            <div style="font-size:0.8rem; color:#666;">{sel_year}년 전체 차이</div>
+            <div style="font-size:1.5rem; font-weight:800; color:{pct_color};">
+                {sign_yr}{yr_pct:.2f}%
+            </div>
+            <div style="font-size:0.8rem; color:#888;">{sign_yr}{yr_diff:,.0f} GJ</div>
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     MONTH_KR = ["1월","2월","3월","4월","5월","6월",
                  "7월","8월","9월","10월","11월","12월"]
@@ -636,10 +676,6 @@ with tab4:
     tbl_cmp["차이_GJ"]  = (tbl_cmp["신방식_GJ"] - tbl_cmp["구방식_GJ"]).round(1)
     tbl_cmp["차이(%)"]  = (tbl_cmp["차이_GJ"] / tbl_cmp["구방식_GJ"].replace(0, float("nan")) * 100).round(2)
     tbl_cmp.index.name  = "연도"
-
-    def color_pct(val):
-        if pd.isna(val): return ""
-        return "color: #e8501a" if val >= 0 else "color: #2c5f8a"
 
     st.dataframe(
         tbl_cmp.style
