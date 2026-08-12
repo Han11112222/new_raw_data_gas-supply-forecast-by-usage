@@ -126,11 +126,30 @@ def calc_by_usage(monthly: pd.DataFrame, ratio: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 # ──────────────────────────────────────────────
+# GitHub 구성비 엑셀 자동 로드
+# ──────────────────────────────────────────────
+GITHUB_RATIO_URL = "https://raw.githubusercontent.com/Han11112222/new_raw_data_gas-supply-forecast-by-usage/main/자가소모 및 구성비 정리_260625.xlsx"
+
+@st.cache_data(ttl=3600)
+def load_ratio_from_github() -> tuple:
+    try:
+        resp = requests.get(GITHUB_RATIO_URL, timeout=15)
+        resp.raise_for_status()
+        return load_ratio(BytesIO(resp.content)), None
+    except Exception as e:
+        return None, str(e)
+
+# ──────────────────────────────────────────────
 # 사이드바
 # ──────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### ⚙️ 설정")
-    uploaded = st.file_uploader("📂 구성비 엑셀 업로드", type=["xlsx"])
+    st.markdown("#### 📂 구성비 파일")
+    uploaded = st.file_uploader(
+        "최신 파일로 교체할 경우만 업로드",
+        type=["xlsx"],
+        help="업로드하지 않으면 GitHub에 저장된 파일을 자동으로 사용합니다."
+    )
     st.markdown("---")
     st.markdown("#### 📅 조회 기간")
     c1, c2 = st.columns(2)
@@ -143,16 +162,21 @@ with st.sidebar:
 st.title("🔥 도시가스 용도별 공급량 예측")
 st.caption("대성에너지(주) 마케팅본부 | 공급량 실적 × 용도별 구성비 → 용도별 공급량 산출")
 
-# ── 구성비 로드
-if uploaded is None:
-    st.warning("👈 사이드바에서 구성비 엑셀 파일을 업로드해 주세요.")
-    st.stop()
-
-try:
-    ratio_df = load_ratio(uploaded)
-except Exception as e:
-    st.error(f"구성비 파일 파싱 오류: {e}")
-    st.stop()
+# ── 구성비 로드 (업로드 파일 우선, 없으면 GitHub 자동)
+if uploaded is not None:
+    try:
+        ratio_df = load_ratio(uploaded)
+        st.sidebar.success("✅ 업로드 파일 사용 중")
+    except Exception as e:
+        st.error(f"업로드 파일 파싱 오류: {e}")
+        st.stop()
+else:
+    ratio_df, ratio_err = load_ratio_from_github()
+    if ratio_df is None:
+        st.error(f"구성비 파일 로드 실패: {ratio_err}")
+        st.info("👈 사이드바에서 구성비 엑셀 파일을 직접 업로드해 주세요.")
+        st.stop()
+    st.sidebar.info("📡 GitHub 파일 자동 사용 중")
 
 # ── 공급량 로드
 supply_df, supply_err = load_supply()
@@ -185,10 +209,9 @@ tab1, tab2, tab3 = st.tabs(["📊 용도별 공급량", "📋 구성비 확인",
 # ──────────────────────────────────────────────
 with tab1:
 
-    # ① 용도별 평균 공급량 기준으로 내림차순 정렬 (차트 하단 = 많은 것)
+    # ① 용도별 합계 기준 오름차순 정렬 → 작은 것부터 add_trace → 많은 것이 하단에 쌓임
     usage_total = result.groupby("용도")["공급량_GJ"].sum()
-    usage_sorted = usage_total.sort_values(ascending=False).index.tolist()
-    # 엑셀에 없는 용도 제외
+    usage_sorted = usage_total.sort_values(ascending=True).index.tolist()
     usage_sorted = [u for u in usage_sorted if u in result["용도"].unique()]
 
     # ② 월별 피벗 (정렬 순서 적용)
@@ -206,10 +229,10 @@ with tab1:
         [usage_sorted]
     )
 
-    # ─ 연도별 누적 막대 차트 (많은 용도가 하단)
+    # ─ 연도별 누적 막대 차트
     st.markdown('<div class="sub">📊 연도별 용도별 공급량 (GJ)</div>', unsafe_allow_html=True)
     fig_yr = go.Figure()
-    for usage in reversed(usage_sorted):   # reversed → 많은 것이 하단에 쌓임
+    for usage in usage_sorted:   # 오름차순: 작은 것 먼저 → 많은 것이 하단
         fig_yr.add_trace(go.Bar(
             x=pivot_year.index.astype(str),
             y=pivot_year[usage],
@@ -227,10 +250,10 @@ with tab1:
     fig_yr.update_yaxes(showgrid=True, gridcolor="#ebebeb")
     st.plotly_chart(fig_yr, use_container_width=True)
 
-    # ─ 월별 누적 막대 차트 (많은 용도가 하단)
+    # ─ 월별 누적 막대 차트
     st.markdown('<div class="sub">📊 월별 용도별 공급량 (GJ)</div>', unsafe_allow_html=True)
     fig_mo = go.Figure()
-    for usage in reversed(usage_sorted):
+    for usage in usage_sorted:
         fig_mo.add_trace(go.Bar(
             x=pivot.index,
             y=pivot[usage],
