@@ -112,8 +112,11 @@ def load_ratio_data(uploaded_file=None):
 
         df = pd.DataFrame(data_rows, index=items, columns=dates)
         df.index.name = "용도"
+        # 인덱스(용도명) 공백·숨은문자 제거
+        df.index = df.index.map(lambda x: str(x).strip() if pd.notna(x) else x)
         # 소계·합계 행 제거 (NaN 항목 or '소계' 포함)
         df = df[~df.index.isna()]
+        df = df[~df.index.str.contains("소|합|계|nan", na=True)]
         df.columns = pd.to_datetime(df.columns)
         df = df.sort_index(axis=1)
         return df, None
@@ -224,9 +227,13 @@ def build_usage_df(monthly_supply: pd.DataFrame, ratio_df: pd.DataFrame, calc_ty
             diff = abs(ratio_df.columns - ym)
             ratio_col = ratio_df.columns[diff.argmin()]
 
+        # ratio_df 인덱스를 strip한 매핑 딕셔너리 생성
+        ratio_index_clean = {str(idx).strip(): idx for idx in ratio_df.index}
+
         for usage in USAGE_ORDER:
-            if usage in ratio_df.index:
-                ratio_val = ratio_df.loc[usage, ratio_col]
+            matched_key = ratio_index_clean.get(usage.strip())
+            if matched_key is not None:
+                ratio_val = ratio_df.loc[matched_key, ratio_col]
                 try:
                     ratio_val = float(ratio_val) / 100.0
                 except Exception:
@@ -236,7 +243,7 @@ def build_usage_df(monthly_supply: pd.DataFrame, ratio_df: pd.DataFrame, calc_ty
                     "연월": ym,
                     "용도": usage,
                     "그룹": GROUP_MAP.get(usage, "기타"),
-                    "비율(%)": ratio_df.loc[usage, ratio_col],
+                    "비율(%)": ratio_df.loc[matched_key, ratio_col],
                     "공급량_GJ": amount,
                 })
 
