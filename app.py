@@ -20,7 +20,18 @@ h1 { color: #1a3c5e; border-bottom: 3px solid #e8501a; padding-bottom: 0.3rem; }
 .badge-old { display:inline-block; background:#2c5f8a; color:#fff;
              padding:2px 10px; border-radius:12px; font-size:0.82rem; margin-right:6px; }
 .badge-new { display:inline-block; background:#e8501a; color:#fff;
-             padding:2px 10px; border-radius:12px; font-size:0.82rem; }
+             padding:2px 10px; border-radius:12px; font-size:0.82rem; margin-right:6px; }
+.info-box {
+    background:#f4f8fc; border-radius:8px; padding:0.9rem 1.4rem;
+    margin-bottom:1rem; border-left:4px solid #2c5f8a;
+    font-size:0.92rem; line-height:2.2;
+}
+.info-row {
+    display:grid;
+    grid-template-columns: 90px 1fr;
+    align-items:center;
+    gap: 0 8px;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -38,22 +49,10 @@ PRODUCT_LIST = [
     "수송용", "열병합용", "연료전지용", "열전용설비용", "주한미군",
 ]
 
-# 구글시트 0-indexed 행 번호
-# 행0=빈행, 행1=수급량(GJ), 행2=총공급량(GJ), 행3=구성비라벨, 행4=헤더
-# 행5~8=주택용, 행9=소계, 행10~18=기타, 행19=소계, 행20=합계
-# 행21=빈, 행22=빈, 행23=상품별분배라벨, 행24=헤더
-# 행25~28=주택용, 행29=소계, 행30~37=기타
-
-TOTAL_SUPPLY_ROW = 2        # 총 공급량(GJ) — D2 (0-indexed = 행1 아니라 행2이므로 인덱스 1)
-# CSV로 읽으면 header=None이라 0-indexed 그대로:
-#   실제 스프레드시트 행1 → raw.iloc[0]
-#   실제 스프레드시트 행2 → raw.iloc[1]  ← 총 공급량
-#   실제 스프레드시트 행4 → raw.iloc[3]  ← 날짜 헤더
-
-TOTAL_ROW_IDX    = 1        # 총 공급량(GJ) row (0-indexed)
-DATE_HEADER_IDX  = 3        # 날짜 헤더 row (0-indexed)
-RATIO_DATA_ROWS  = [4, 5, 6, 7,   9, 10, 11, 12, 13, 14, 15, 16, 17]   # 구성비 (소계 제외)
-SUPPLY_DATA_ROWS = [24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 36] # 상품별 분배
+TOTAL_ROW_IDX   = 1   # 총 공급량(GJ) — 스프레드시트 행2 (0-indexed=1)
+DATE_HEADER_IDX = 3   # 날짜 헤더    — 스프레드시트 행4 (0-indexed=3)
+RATIO_DATA_ROWS  = [4, 5, 6, 7,   9, 10, 11, 12, 13, 14, 15, 16, 17]
+SUPPLY_DATA_ROWS = [24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37]
 
 GROUP_MAP = {
     "취사용":"주택용","개별난방용":"주택용","중앙난방용":"주택용","자가열전용":"주택용",
@@ -72,40 +71,27 @@ COLOR_MAP = {
 # ──────────────────────────────────────────────
 @st.cache_data(ttl=1800)
 def load_new_gsheet() -> tuple:
-    """
-    구글시트에서:
-      - 행2(0-indexed=1): 총 공급량(GJ) - 월별 합산값 → 신규방식 raw total
-      - 행5~행18: 구성비(%) → 상품별 비율
-      - 행25~행37: 상품별 분배(GJ) → 신규방식 상품별 공급량
-    반환: (total_supply_df, ratio_df, supply_df, dates, 에러)
-      total_supply_df: DataFrame [연월, 총공급량_GJ]
-      ratio_df       : DataFrame (index=상품, columns=Timestamp, 값=구성비%)
-      supply_df      : DataFrame (index=상품, columns=Timestamp, 값=공급량GJ)
-    """
     try:
         resp = requests.get(NEW_GSHEET_URL, timeout=20)
         resp.raise_for_status()
         raw = pd.read_csv(StringIO(resp.text), header=None)
 
-        # 날짜: 행4(0-indexed=3), C열~
         dates = pd.to_datetime(raw.iloc[DATE_HEADER_IDX, 2:], errors="coerce")
         valid_cols = [i for i, d in enumerate(dates) if pd.notna(d)]
         dates_valid = dates.iloc[valid_cols]
 
-        # 총 공급량(GJ): 행2(0-indexed=1), C열~
+        # 총 공급량(GJ) — 행2(0-indexed=1)
         total_vals = pd.to_numeric(
             raw.iloc[TOTAL_ROW_IDX, 2:].iloc[valid_cols]
             .astype(str).str.replace(",", ""),
             errors="coerce"
         ).values
-
         total_supply_df = pd.DataFrame({
             "연월": dates_valid.values,
             "총공급량_GJ": total_vals,
         })
         total_supply_df = total_supply_df[total_supply_df["총공급량_GJ"] > 0].reset_index(drop=True)
 
-        # 구성비 / 상품별분배 추출 함수
         def extract_rows(row_indices):
             result = {}
             for idx, row_i in enumerate(row_indices):
@@ -124,7 +110,6 @@ def load_new_gsheet() -> tuple:
 
         ratio_df  = extract_rows(RATIO_DATA_ROWS)
         supply_df = extract_rows(SUPPLY_DATA_ROWS)
-
         return total_supply_df, ratio_df, supply_df, dates_valid, None
     except Exception as e:
         return None, None, None, None, str(e)
@@ -174,10 +159,9 @@ def load_old_from_github() -> tuple:
         return None, str(e)
 
 # ──────────────────────────────────────────────
-# 신규방식 result 빌드 (구글시트 상품별분배 사용)
+# 신규방식 result 빌드
 # ──────────────────────────────────────────────
-def build_new_result(supply_df: pd.DataFrame, ratio_df: pd.DataFrame,
-                     y_start: int, y_end: int) -> pd.DataFrame:
+def build_new_result(supply_df, ratio_df, y_start, y_end):
     rows = []
     for col in supply_df.columns:
         if pd.isna(col) or not (y_start <= col.year <= y_end):
@@ -199,9 +183,39 @@ def build_new_result(supply_df: pd.DataFrame, ratio_df: pd.DataFrame,
         df["연도"] = df["연월"].dt.year
     return df
 
+# ──────────────────────────────────────────────
+# 스타일 헬퍼
+# ──────────────────────────────────────────────
 def color_pct(val):
     if pd.isna(val): return ""
     return "color: #e8501a" if val >= 0 else "color: #2c5f8a"
+
+SUBTOTAL_LABEL = "소 계"
+SUBTOTAL_STYLE = "background-color: #ddeaf8; font-weight: bold; color: #1a3c5e;"
+
+def style_subtotal(df):
+    """소 계 행에만 배경 하이라이트"""
+    styles = pd.DataFrame("", index=df.index, columns=df.columns)
+    if SUBTOTAL_LABEL in df.index:
+        styles.loc[SUBTOTAL_LABEL] = SUBTOTAL_STYLE
+    return styles
+
+def add_subtotal_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    index=상품, columns=날짜(str) 형태의 DataFrame 하단에 소 계 행 추가.
+    모든 숫자 열을 합산.
+    """
+    numeric_cols = df.select_dtypes(include="number").columns.tolist()
+    subtotal_vals = {c: df[c].sum() for c in numeric_cols}
+    subtotal_row  = pd.DataFrame([subtotal_vals], index=[SUBTOTAL_LABEL])
+    subtotal_row.index.name = df.index.name
+    return pd.concat([df, subtotal_row])
+
+def style_subtotal_any(df):
+    styles = pd.DataFrame("", index=df.index, columns=df.columns)
+    if SUBTOTAL_LABEL in df.index:
+        styles.loc[SUBTOTAL_LABEL] = SUBTOTAL_STYLE
+    return styles
 
 # ──────────────────────────────────────────────
 # 사이드바
@@ -211,8 +225,7 @@ with st.sidebar:
     st.markdown("#### 📂 이전방식 비교 파일")
     uploaded_old = st.file_uploader(
         "상품별공급량_MJ실적.xlsx 업로드",
-        type=["xlsx"],
-        key="old_file",
+        type=["xlsx"], key="old_file",
         help="업로드하지 않으면 GitHub 파일을 자동으로 사용합니다."
     )
     st.markdown("---")
@@ -227,20 +240,24 @@ with st.sidebar:
 st.title("🔥 도시가스 상품별 공급량 분석")
 st.caption("대성에너지(주) 마케팅본부")
 
+# 설명 배너 — grid로 두 열 정렬
 st.markdown("""
-<div style="background:#f4f8fc; border-radius:8px; padding:0.9rem 1.2rem; margin-bottom:1rem;
-            border-left:4px solid #2c5f8a; font-size:0.92rem; line-height:2.0;">
-  <span class="badge-old">이전방식</span>
-  총 공급량 = 상품별 공급량의 합산 &nbsp;|&nbsp; 상품별 공급량 비율 적용<br>
-  <span class="badge-new">신규방식</span>
-  총 공급량 = 상품별 공급량의 합산 &nbsp;|&nbsp; 가스공사 비용 정산 비율 반영<br>
-  <span style="color:#888; font-size:0.85rem;">
+<div class="info-box">
+  <div class="info-row">
+    <div><span class="badge-old">이전방식</span></div>
+    <div>총 공급량 = 상품별 공급량의 합산 &nbsp;|&nbsp; 상품별 공급량 비율 적용</div>
+  </div>
+  <div class="info-row">
+    <div><span class="badge-new">신규방식</span></div>
+    <div>총 공급량 = 상품별 공급량의 합산 &nbsp;|&nbsp; 가스공사 비용 정산 비율 반영</div>
+  </div>
+  <div style="margin-top:6px; color:#888; font-size:0.85rem;">
     ※ 이전방식과 신규방식은 상품별 비율 산출 기준이 달라 상품별 공급량이 다를 수 있습니다.
-  </span>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 
-# ── 데이터 로드: 구글시트(신규방식)
+# ── 데이터 로드
 total_supply_df, ratio_df, supply_df, dates, gs_err = load_new_gsheet()
 if gs_err or ratio_df is None:
     st.error(f"구글시트 로드 실패: {gs_err}")
@@ -248,7 +265,6 @@ if gs_err or ratio_df is None:
     st.stop()
 st.sidebar.success("✅ 구글시트(신규방식) 로드 완료")
 
-# ── 데이터 로드: 이전방식
 if uploaded_old is not None:
     try:
         old_df = load_old_supply(uploaded_old)
@@ -263,10 +279,8 @@ else:
         st.stop()
     st.sidebar.info("📡 이전방식 파일: GitHub 자동 사용")
 
-# ── 신규방식 result
+# ── result 빌드
 new_result = build_new_result(supply_df, ratio_df, y_start, y_end)
-
-# ── 이전방식 기간 필터
 old_result = old_df[
     (old_df["연월"].dt.year >= y_start) &
     (old_df["연월"].dt.year <= y_end)
@@ -274,7 +288,6 @@ old_result = old_df[
 if not old_result.empty:
     old_result["연도"] = old_result["연월"].dt.year
 
-# ── 총 공급량 기간 필터 (신규방식 raw)
 total_filtered = total_supply_df[
     (pd.to_datetime(total_supply_df["연월"]).dt.year >= y_start) &
     (pd.to_datetime(total_supply_df["연월"]).dt.year <= y_end)
@@ -284,16 +297,15 @@ if new_result.empty:
     st.warning("선택 기간에 신규방식 데이터가 없습니다.")
     st.stop()
 
-# 상품 정렬 (신규방식 합계 기준)
 product_total  = new_result.groupby("상품")["공급량_GJ"].sum()
 product_sorted = product_total.sort_values(ascending=False).index.tolist()
 
 # ══════════════════════════════════════════════
-# TAB 구성 (2개)
+# TAB 구성
 # ══════════════════════════════════════════════
 tab1, tab2 = st.tabs([
     "🔍 이전방식 vs 신규방식 비교",
-    "📋 구성비 및 원시 데이터 확인",
+    "📋 구성비 및 raw 데이터 확인",
 ])
 
 # ══════════════════════════════════════════════
@@ -303,15 +315,14 @@ with tab1:
     st.markdown("""
     <span class="badge-old">이전방식</span> 상품별 공급량 비율 적용 &nbsp;
     <span class="badge-new">신규방식</span> 가스공사 비용 정산 비율 반영
-    <br><span style="color:#888; font-size:0.85rem; line-height:2;">
+    <br><span style="color:#888; font-size:0.85rem; line-height:2.5;">
     ※ 두 방식 모두 월별 총 공급량(구글시트 D2행)을 기준으로 상품별 배분합니다.</span>
     <br><br>
     """, unsafe_allow_html=True)
 
     common_products = [p for p in OLD_COL_MAP.keys() if p in new_result["상품"].unique()]
     selected_product = st.selectbox(
-        "비교할 상품 선택",
-        options=common_products,
+        "비교할 상품 선택", options=common_products,
         index=common_products.index("개별난방용") if "개별난방용" in common_products else 0,
     )
 
@@ -325,7 +336,7 @@ with tab1:
     new_vals = [new_yr_p.get(y, 0) for y in years_p]
     pct_list = [(n - o) / o * 100 if o else 0.0 for o, n in zip(old_vals, new_vals)]
 
-    # ── 연도별 비교 막대
+    # 연도별 비교 막대
     st.markdown(f'<div class="sub">📊 연도별 비교 — {selected_product} (GJ)</div>', unsafe_allow_html=True)
     max_val = max(max(old_vals, default=1), max(new_vals, default=1))
     fig_cmp_yr = go.Figure()
@@ -360,7 +371,7 @@ with tab1:
     )
     st.plotly_chart(fig_cmp_yr, use_container_width=True)
 
-    # ── 월별 추이 라인
+    # 월별 추이 라인
     st.markdown(f'<div class="sub">📈 월별 추이 비교 — {selected_product} (GJ)</div>', unsafe_allow_html=True)
     st.caption("💡 마우스 휠: 확대/축소 | 드래그: 이동")
     fig_cmp_mo = go.Figure()
@@ -390,7 +401,7 @@ with tab1:
 
     st.markdown("---")
 
-    # ── 특정 연도 월별 비교
+    # 특정 연도 월별 비교
     st.markdown(f'<div class="sub">📊 특정 연도 월별 비교 — {selected_product} (GJ)</div>', unsafe_allow_html=True)
     avail_years = sorted(set(old_prod.index.year) & set(new_prod.index.year))
     if not avail_years:
@@ -401,10 +412,10 @@ with tab1:
 
         old_yr_total_v = old_yr_p.get(sel_year, 0)
         new_yr_total_v = new_yr_p.get(sel_year, 0)
-        yr_diff  = new_yr_total_v - old_yr_total_v
-        yr_pct   = yr_diff / old_yr_total_v * 100 if old_yr_total_v else 0
-        sign_yr  = "+" if yr_pct >= 0 else ""
-        pct_col  = "#e8501a" if yr_pct >= 0 else "#2c5f8a"
+        yr_diff = new_yr_total_v - old_yr_total_v
+        yr_pct  = yr_diff / old_yr_total_v * 100 if old_yr_total_v else 0
+        sign_yr = "+" if yr_pct >= 0 else ""
+        pct_col = "#e8501a" if yr_pct >= 0 else "#2c5f8a"
 
         st.markdown(f"""
         <div style="display:flex; gap:1rem; margin-bottom:1rem;">
@@ -469,44 +480,35 @@ with tab1:
         )
         st.plotly_chart(fig_mo_yr, use_container_width=True)
 
-        # 월별 비교 테이블 + 소계 행
-        mo_data = {
+        # 월별 비교 테이블 + 소계
+        tbl_mo_yr = pd.DataFrame({
             "이전방식_GJ": old_mo_vals,
             "신규방식_GJ": new_mo_vals,
             "차이_GJ":     [n - o for o, n in zip(old_mo_vals, new_mo_vals)],
             "차이(%)":     mo_pct,
-        }
-        tbl_mo_yr = pd.DataFrame(mo_data, index=MONTH_KR)
+        }, index=MONTH_KR)
         tbl_mo_yr.index.name = "월"
 
-        # 소계 행 추가
-        subtotal = pd.DataFrame([{
+        subtotal_mo = pd.DataFrame([{
             "이전방식_GJ": sum(old_mo_vals),
             "신규방식_GJ": sum(new_mo_vals),
             "차이_GJ":     sum(new_mo_vals) - sum(old_mo_vals),
             "차이(%)":     (sum(new_mo_vals) - sum(old_mo_vals)) / sum(old_mo_vals) * 100
                            if sum(old_mo_vals) else 0.0,
-        }], index=["소 계"])
-        subtotal.index.name = "월"
-        tbl_mo_full = pd.concat([tbl_mo_yr, subtotal])
-
-        # 스타일 함수 (소계 행 배경 강조)
-        def style_table(df):
-            styles = pd.DataFrame("", index=df.index, columns=df.columns)
-            if "소 계" in df.index:
-                styles.loc["소 계"] = "background-color: #e8f0fb; font-weight: bold; color: #1a3c5e;"
-            return styles
+        }], index=[SUBTOTAL_LABEL])
+        subtotal_mo.index.name = "월"
+        tbl_mo_full = pd.concat([tbl_mo_yr, subtotal_mo])
 
         st.dataframe(
             tbl_mo_full.style
                 .format({"이전방식_GJ": "{:,.1f}", "신규방식_GJ": "{:,.1f}",
                          "차이_GJ": "{:,.1f}", "차이(%)": "{:+.2f}%"})
-                .apply(style_table, axis=None)
+                .apply(style_subtotal_any, axis=None)
                 .map(color_pct, subset=["차이(%)"]),
             use_container_width=True,
         )
 
-    # ── 연도별 비교 테이블 + 소계
+    # 연도별 비교 테이블 + 소계
     st.markdown(f'<div class="sub">📋 연도별 비교 테이블 — {selected_product}</div>', unsafe_allow_html=True)
     tbl_cmp = pd.DataFrame({
         "이전방식_GJ": old_yr_p,
@@ -518,14 +520,13 @@ with tab1:
     ).round(2)
     tbl_cmp.index.name = "연도"
 
-    # 소계 행 추가
     yr_subtotal = pd.DataFrame([{
         "이전방식_GJ": tbl_cmp["이전방식_GJ"].sum(),
         "신규방식_GJ": tbl_cmp["신규방식_GJ"].sum(),
         "차이_GJ":     tbl_cmp["차이_GJ"].sum(),
         "차이(%)":     tbl_cmp["차이_GJ"].sum() / tbl_cmp["이전방식_GJ"].sum() * 100
                        if tbl_cmp["이전방식_GJ"].sum() else 0.0,
-    }], index=["소 계"])
+    }], index=[SUBTOTAL_LABEL])
     yr_subtotal.index.name = "연도"
     tbl_cmp_full = pd.concat([tbl_cmp, yr_subtotal])
 
@@ -533,7 +534,7 @@ with tab1:
         tbl_cmp_full.style
             .format({"이전방식_GJ": "{:,.1f}", "신규방식_GJ": "{:,.1f}",
                      "차이_GJ": "{:,.1f}", "차이(%)": "{:+.2f}%"})
-            .apply(style_table, axis=None)
+            .apply(style_subtotal_any, axis=None)
             .map(color_pct, subset=["차이(%)"]),
         use_container_width=True,
     )
@@ -549,7 +550,7 @@ with tab1:
 
 
 # ══════════════════════════════════════════════
-# TAB 2 : 구성비 및 원시 데이터 확인
+# TAB 2 : 구성비 및 raw 데이터 확인
 # ══════════════════════════════════════════════
 with tab2:
     sub1, sub2, sub3 = st.tabs([
@@ -558,38 +559,68 @@ with tab2:
         "📅 월별 총 공급량 (구글시트 D2)",
     ])
 
+    # ── 서브탭 1: 구성비
     with sub1:
         st.markdown('<div class="sub">구성비 (%) — 가스공사 비용 정산 비율</div>', unsafe_allow_html=True)
         disp_ratio = ratio_df.copy()
-        # 기간 필터
         disp_ratio = disp_ratio[[c for c in disp_ratio.columns
                                   if pd.notna(c) and y_start <= c.year <= y_end]]
         disp_ratio.columns = [c.strftime("%Y-%m") for c in disp_ratio.columns]
-        st.dataframe(disp_ratio.style.format("{:.4f}"), use_container_width=True, height=430)
+
+        # 소계 행 추가 (열 합계 = 100이어야 하므로 sum)
+        subtotal_ratio = pd.DataFrame(
+            [disp_ratio.sum(numeric_only=True)],
+            index=[SUBTOTAL_LABEL]
+        )
+        subtotal_ratio.index.name = disp_ratio.index.name
+        disp_ratio_full = pd.concat([disp_ratio, subtotal_ratio])
+
+        st.dataframe(
+            disp_ratio_full.style
+                .format("{:.4f}")
+                .apply(style_subtotal_any, axis=None),
+            use_container_width=True, height=460,
+        )
         buf_r = BytesIO()
         with pd.ExcelWriter(buf_r, engine="openpyxl") as w:
-            disp_ratio.to_excel(w, sheet_name="구성비")
+            disp_ratio_full.to_excel(w, sheet_name="구성비")
         st.download_button("⬇️ 구성비 엑셀 다운로드", data=buf_r.getvalue(),
             file_name=f"구성비_{y_start}_{y_end}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_ratio")
 
+    # ── 서브탭 2: 상품별 공급량 원본
     with sub2:
         st.markdown('<div class="sub">상품별 월별 공급량 (GJ) — 구글시트 원본</div>', unsafe_allow_html=True)
         disp_sup = supply_df.copy()
         disp_sup = disp_sup[[c for c in disp_sup.columns
                               if pd.notna(c) and y_start <= c.year <= y_end]]
         disp_sup.columns = [c.strftime("%Y-%m") for c in disp_sup.columns]
-        st.dataframe(disp_sup.style.format("{:,.1f}"), use_container_width=True, height=400)
+
+        # 소계 행 추가
+        subtotal_sup = pd.DataFrame(
+            [disp_sup.sum(numeric_only=True)],
+            index=[SUBTOTAL_LABEL]
+        )
+        subtotal_sup.index.name = disp_sup.index.name
+        disp_sup_full = pd.concat([disp_sup, subtotal_sup])
+
+        st.dataframe(
+            disp_sup_full.style
+                .format("{:,.1f}")
+                .apply(style_subtotal_any, axis=None),
+            use_container_width=True, height=460,
+        )
         buf_s = BytesIO()
         with pd.ExcelWriter(buf_s, engine="openpyxl") as w:
-            disp_sup.to_excel(w, sheet_name="상품별공급량")
+            disp_sup_full.to_excel(w, sheet_name="상품별공급량")
         st.download_button("⬇️ 상품별 공급량 엑셀 다운로드", data=buf_s.getvalue(),
             file_name=f"상품별공급량_{y_start}_{y_end}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_sup")
 
+    # ── 서브탭 3: 월별 총 공급량
     with sub3:
         st.markdown('<div class="sub">월별 총 공급량 (GJ) — 구글시트 D2행</div>', unsafe_allow_html=True)
-        st.caption("구글시트 2행의 총 공급량(GJ) 데이터 — 신규방식 산출 기준")
+        st.caption("구글시트 2행의 총 공급량(GJ) — 신규방식 산출 기준")
         disp_total = total_filtered.copy()
         disp_total["연월"] = pd.to_datetime(disp_total["연월"]).dt.strftime("%Y-%m")
         disp_total["총공급량_GJ"] = disp_total["총공급량_GJ"].round(1)
