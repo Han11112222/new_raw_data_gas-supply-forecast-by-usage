@@ -43,12 +43,11 @@ PRODUCT_LIST     = HOUSING_PRODUCTS + OTHER_PRODUCTS
 GROUP_MAP = {p: "주택용" for p in HOUSING_PRODUCTS}
 GROUP_MAP.update({p: "기타" for p in OTHER_PRODUCTS})
 
-COLOR_MAP = {
-    "취사용":"#4e79a7","개별난방용":"#f28e2b","중앙난방용":"#e15759","자가열전용":"#76b7b2",
-    "일반용":"#59a14f","냉난방공조용":"#edc948","업무난방용":"#b07aa1","산업용":"#ff9da7",
-    "수송용":"#9c755f","열병합용":"#bab0ac","연료전지용":"#86bcb6","열전용설비용":"#d3a0a0",
-    "주한미군":"#aecbcf",
-}
+# 정산그룹 rowspan 구조
+GROUP_SPANS = [
+    ("주택용", len(HOUSING_PRODUCTS) + 1),   # data 4 + subtotal 1 = 5
+    ("기타",   len(OTHER_PRODUCTS)   + 1),   # data 9 + subtotal 1 = 10
+]
 
 TOTAL_ROW_IDX   = 1
 DATE_HEADER_IDX = 3
@@ -58,7 +57,6 @@ SUPPLY_DATA_ROWS = [24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37]
 SUBTOTAL_LABEL = "소 계"
 TOTAL_LABEL    = "합 계"
 SUBTOTAL_STYLE = "background-color:#ddeaf8; font-weight:bold; color:#1a3c5e;"
-TOTAL_STYLE    = "background-color:#c5d8f0; font-weight:bold; color:#1a3c5e;"
 
 # ──────────────────────────────────────────────
 # 데이터 로드
@@ -155,14 +153,9 @@ def build_new_result(supply_df, ratio_df, y_start, y_end):
     return df
 
 # ──────────────────────────────────────────────
-# 피벗 빌더: MultiIndex를 활용한 병합 표시
+# 피벗 빌더 (단일 정수 인덱스)
 # ──────────────────────────────────────────────
 def build_pivot_flat(df_long: pd.DataFrame, value_col: str = "공급량_GJ"):
-    """
-    반환:
-      display_df : MultiIndex 적용된 DataFrame (index=[정산그룹, 정산항목], columns=[YYYY-MM, ...])
-      row_types  : list[str] — 'data'/'subtotal'/'total'
-    """
     pivot = (
         df_long.pivot_table(index="상품", columns="연월", values=value_col, aggfunc="sum")
         .fillna(0)
@@ -171,107 +164,224 @@ def build_pivot_flat(df_long: pd.DataFrame, value_col: str = "공급량_GJ"):
     date_cols = [c.strftime("%Y-%m") for c in pivot.columns]
     pivot.columns = date_cols
 
-    rows_data = []   
-    row_types = []
-
-    # MultiIndex를 구성하기 위해 (그룹, 항목) 튜플 형태로 데이터 조립
+    rows_data = []
     for group, products in [("주택용", HOUSING_PRODUCTS), ("기타", OTHER_PRODUCTS)]:
-        for p in products:
+        for i, p in enumerate(products):
             row = pivot.loc[p].copy() if p in pivot.index else pd.Series(0.0, index=date_cols)
-            rows_data.append(((group, p), row))
-            row_types.append("data")
-
+            g_label = group if i == 0 else ""
+            rows_data.append((g_label, p, "data", row))
         sub_ps  = [p for p in products if p in pivot.index]
         sub_row = pivot.loc[sub_ps].sum() if sub_ps else pd.Series(0.0, index=date_cols)
-        rows_data.append(((group, SUBTOTAL_LABEL), sub_row))
-        row_types.append("subtotal")
+        rows_data.append(("", SUBTOTAL_LABEL, "subtotal", sub_row))
 
     total_row = pivot.sum()
-    rows_data.append((("총계", TOTAL_LABEL), total_row))
-    row_types.append("total")
+    rows_data.append(("", TOTAL_LABEL, "total", total_row))
 
-    # MultiIndex 생성
-    idx = pd.MultiIndex.from_tuples([r[0] for r in rows_data], names=["정산그룹", "정산항목"])
-    display_df = pd.DataFrame([r[1] for r in rows_data], index=idx)
-    
+    row_types = [r[2] for r in rows_data]
+    records = []
+    for g_label, item, rtype, series in rows_data:
+        rec = {"정산그룹": g_label, "정산항목": item}
+        rec.update(series.to_dict())
+        records.append(rec)
+
+    display_df = pd.DataFrame(records)
     return display_df, row_types
 
 # ──────────────────────────────────────────────
-# 그라데이션 스타일러 (MultiIndex 호환)
+# HTML 테이블 렌더러 (실제 rowspan 병합)
 # ──────────────────────────────────────────────
-def style_pivot_flat(df: pd.DataFrame, row_types: list,
-                     gradient: bool = False,
-                     diff_mode: bool = False) -> "pd.io.formats.style.Styler":
-    """
-    df는 숫자 데이터만 포함하며 인덱스가 정산그룹과 정산항목으로 구성됩니다.
-    diff_mode=False : 파랑 계열 그라데이션 (공급량)
-    diff_mode=True  : 양수=오렌지, 음수=파랑 (차이/차이율)
-    """
-    n_rows, n_cols = df.shape
+_TABLE_CSS = """
+<style>
+.pivot-wrap {
+    overflow-x: auto;
+    overflow-y: auto;
+    max-height: 620px;
+    margin-bottom: 1rem;
+    border-radius: 6px;
+    border: 1px solid #c8d8e8;
+}
+.pivot-tbl {
+    border-collapse: collapse;
+    font-size: 0.78rem;
+    font-family: 'Segoe UI', 'Noto Sans KR', sans-serif;
+    white-space: nowrap;
+    min-width: 100%;
+}
+.pivot-tbl thead th {
+    background: #2c5f8a;
+    color: #fff;
+    padding: 6px 10px;
+    text-align: center;
+    position: sticky;
+    top: 0;
+    z-index: 3;
+    border: 1px solid #1a3c5e;
+    font-weight: 600;
+}
+.pivot-tbl th.th-grp  { min-width: 58px; }
+.pivot-tbl th.th-item { min-width: 96px; text-align: left; padding-left:10px; }
+.pivot-tbl th.th-date { min-width: 72px; }
+.pivot-tbl td {
+    padding: 4px 10px;
+    text-align: right;
+    border: 1px solid #dde3ea;
+}
+.pivot-tbl td.td-group {
+    text-align: center;
+    font-weight: 700;
+    color: #1a3c5e;
+    background: #eaf1f8 !important;
+    border-right: 2px solid #2c5f8a;
+    vertical-align: middle;
+    position: sticky;
+    left: 0;
+    z-index: 1;
+}
+.pivot-tbl td.td-item {
+    text-align: left;
+    padding-left: 14px;
+    background: #fff;
+    position: sticky;
+    left: 62px;
+    z-index: 1;
+    border-right: 1px solid #c8d8e8;
+}
+.pivot-tbl tr.row-data:hover td { background: #f0f6ff !important; }
+.pivot-tbl tr.row-sub  td { background: #ddeaf8 !important; font-weight:700; color:#1a3c5e; }
+.pivot-tbl tr.row-sub  td.td-item { text-align:center; padding-left:0; }
+.pivot-tbl tr.row-total td { background: #c5d8f0 !important; font-weight:700; color:#1a3c5e; }
+.pivot-tbl tr.row-total td.td-item { text-align:center; padding-left:0; }
+</style>
+"""
 
-    bg  = [[""] * n_cols for _ in range(n_rows)]
-    txt = [[""] * n_cols for _ in range(n_rows)]
+def _gradient_bg(val: float, abs_max: float, diff_mode: bool) -> str:
+    """값에 따른 인라인 background-color 스타일 반환"""
+    if abs_max == 0 or np.isnan(val):
+        return ""
+    intensity = min(abs(val) / abs_max, 1.0)
+    alpha = 0.06 + intensity * 0.55
+    if diff_mode:
+        if val > 0:
+            return f"background-color:rgba(232,80,26,{alpha:.2f});"
+        elif val < 0:
+            return f"background-color:rgba(44,95,138,{alpha:.2f});"
+        return ""
+    else:
+        r = int(44  + (1 - intensity) * 170)
+        g = int(95  + (1 - intensity) * 120)
+        b = int(138 + (1 - intensity) * 90)
+        return f"background-color:rgba({r},{g},{b},{alpha:.2f});"
 
+def _diff_text_color(val: float) -> str:
+    try:
+        if val > 0: return "color:#9b2a00;"
+        if val < 0: return "color:#0a2a44;"
+    except: pass
+    return ""
+
+def build_html_pivot(display_df: pd.DataFrame, row_types: list,
+                     fmt_func=None, diff_mode: bool = False,
+                     gradient: bool = True) -> str:
+    """
+    display_df : columns = [정산그룹, 정산항목, YYYY-MM, ...]
+    row_types  : list of 'data'/'subtotal'/'total'
+    fmt_func   : (float) -> str  포맷 함수
+    diff_mode  : True=양수오렌지/음수파랑, False=파랑단방향
+    gradient   : True=그라데이션 배경
+    """
+    date_cols = [c for c in display_df.columns if c not in ("정산그룹", "정산항목")]
+    df = display_df.reset_index(drop=True)
+
+    # 그라데이션 기준: data 행 숫자값만
     abs_max = 1.0
     if gradient:
-        data_mask = [t == "data" for t in row_types]
+        data_mask = [i for i, t in enumerate(row_types) if t == "data"]
         try:
-            data_vals = df.iloc[data_mask, :].values.astype(float)
-            if diff_mode:
-                abs_max = float(np.nanmax(np.abs(data_vals))) if data_vals.size > 0 else 1.0
-            else:
-                abs_max = float(np.nanmax(data_vals)) if data_vals.size > 0 else 1.0
+            data_vals = df.loc[data_mask, date_cols].values.astype(float)
+            abs_max = float(np.nanmax(np.abs(data_vals))) if diff_mode else float(np.nanmax(data_vals))
+            if abs_max == 0: abs_max = 1.0
         except Exception:
             abs_max = 1.0
-    if abs_max == 0:
-        abs_max = 1.0
 
+    # rowspan 매핑
+    group_cell = {}
+    gi = 0
+    for gname, gspan in GROUP_SPANS:
+        group_cell[gi] = (gname, gspan)
+        for k in range(1, gspan):
+            group_cell[gi + k] = None
+        gi += gspan
+    group_cell[gi] = ("", 1)   # 합계 행
+
+    # 헤더
+    hdr = "<tr>"
+    hdr += '<th class="th-grp">정산그룹</th>'
+    hdr += '<th class="th-item">정산항목</th>'
+    for dc in date_cols:
+        hdr += f'<th class="th-date">{dc}</th>'
+    hdr += "</tr>"
+
+    # 바디
+    body = ""
     for i, rtype in enumerate(row_types):
-        if rtype == "subtotal":
-            for j in range(n_cols):
-                bg[i][j]  = "background-color:#ddeaf8;"
-                txt[i][j] = "font-weight:bold; color:#1a3c5e;"
-        elif rtype == "total":
-            for j in range(n_cols):
-                bg[i][j]  = "background-color:#c5d8f0;"
-                txt[i][j] = "font-weight:bold; color:#1a3c5e;"
-        elif gradient:
-            for j in range(n_cols):
-                try:
-                    val = float(df.iloc[i, j])
-                    if np.isnan(val):
-                        continue
-                except Exception:
-                    continue
+        row_cls = {"data":"row-data","subtotal":"row-sub","total":"row-total"}.get(rtype,"row-data")
+        body += f'<tr class="{row_cls}">'
 
+        # 정산그룹 (rowspan 병합)
+        gc = group_cell.get(i)
+        if gc is not None:
+            gname, gspan = gc
+            body += f'<td class="td-group" rowspan="{gspan}">{gname}</td>'
+        # gc == None → 병합됐으므로 생략
+
+        # 정산항목
+        item = df.at[i, "정산항목"]
+        body += f'<td class="td-item">{item}</td>'
+
+        # 날짜 열
+        for dc in date_cols:
+            raw_val = df.at[i, dc]
+            try:
+                fval = float(raw_val)
+                is_nan = np.isnan(fval)
+            except Exception:
+                fval, is_nan = 0.0, True
+
+            # 포맷
+            if is_nan:
+                disp = "-"
+            elif fmt_func:
+                disp = fmt_func(fval)
+            else:
+                disp = f"{fval:,.0f}"
+
+            # 스타일
+            style_parts = []
+            if not is_nan and gradient and rtype == "data":
+                bg = _gradient_bg(fval, abs_max, diff_mode)
+                if bg: style_parts.append(bg)
                 if diff_mode:
-                    intensity = min(abs(val) / abs_max, 1.0)
-                    alpha = 0.07 + intensity * 0.58
-                    if val > 0:
-                        bg[i][j]  = f"background-color:rgba(232,80,26,{alpha:.2f});"
-                        if intensity > 0.55:
-                            txt[i][j] = "color:#6b1500;"
-                    elif val < 0:
-                        bg[i][j]  = f"background-color:rgba(44,95,138,{alpha:.2f});"
-                        if intensity > 0.55:
-                            txt[i][j] = "color:#0a1f30;"
-                else:
-                    intensity = min(val / abs_max, 1.0) if val > 0 else 0.0
-                    alpha = 0.05 + intensity * 0.55
-                    r = int(44  + (1 - intensity) * 170)
-                    g = int(95  + (1 - intensity) * 120)
-                    b = int(138 + (1 - intensity) * 90)
-                    bg[i][j] = f"background-color:rgba({r},{g},{b},{alpha:.2f});"
-                    if intensity > 0.6:
-                        txt[i][j] = "color:#fff;"
+                    tc = _diff_text_color(fval)
+                    if tc: style_parts.append(tc)
 
-    def _apply_bg(df_):
-        return pd.DataFrame(bg, index=df_.index, columns=df_.columns)
-    def _apply_txt(df_):
-        return pd.DataFrame(txt, index=df_.index, columns=df_.columns)
+            style_attr = f' style="{" ".join(style_parts)}"' if style_parts else ""
+            body += f"<td{style_attr}>{disp}</td>"
 
-    return df.style.apply(_apply_bg, axis=None).apply(_apply_txt, axis=None)
+        body += "</tr>"
 
+    return f"""
+{_TABLE_CSS}
+<div class="pivot-wrap">
+  <table class="pivot-tbl">
+    <thead>{hdr}</thead>
+    <tbody>{body}</tbody>
+  </table>
+</div>
+"""
+
+# ──────────────────────────────────────────────
+# 기타 헬퍼
+# ──────────────────────────────────────────────
 def color_pct(val):
     if pd.isna(val): return ""
     return "color:#e8501a;" if val >= 0 else "color:#2c5f8a;"
@@ -364,73 +474,75 @@ tab0, tab1, tab2 = st.tabs([
 ])
 
 # ══════════════════════════════════════════════
-# TAB 0 : 전체 비교 매트릭스
+# TAB 0 : 전체 비교 매트릭스 (HTML rowspan 테이블)
 # ══════════════════════════════════════════════
 with tab0:
 
-    # ── 이전방식 피벗
-    st.markdown('<div class="sub">📋 이전방식 — 상품별 월별 공급량 (GJ)</div>', unsafe_allow_html=True)
+    # ── 피벗 데이터 생성
     old_pivot, old_rtypes = build_pivot_flat(old_result, "공급량_GJ")
-    st.dataframe(
-        style_pivot_flat(old_pivot, old_rtypes, gradient=True, diff_mode=False)
-        .format(formatter="{:,.0f}"),
-        use_container_width=True, height=590,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── 신규방식 피벗
-    st.markdown('<div class="sub">📋 신규방식 — 상품별 월별 공급량 (GJ)</div>', unsafe_allow_html=True)
     new_pivot, new_rtypes = build_pivot_flat(new_result, "공급량_GJ")
-    st.dataframe(
-        style_pivot_flat(new_pivot, new_rtypes, gradient=True, diff_mode=False)
-        .format(formatter="{:,.0f}"),
-        use_container_width=True, height=590,
-    )
 
-    st.markdown("<br>", unsafe_allow_html=True)
+    date_cols_old = [c for c in old_pivot.columns if c not in ("정산그룹","정산항목")]
+    date_cols_new = [c for c in new_pivot.columns if c not in ("정산그룹","정산항목")]
+    common_date_cols = sorted(set(date_cols_old) & set(date_cols_new))
 
-    # ── 차이(GJ) 피벗
-    st.markdown('<div class="sub">📋 차이 (신규 − 이전, GJ) — 클수록 진한 색상</div>', unsafe_allow_html=True)
+    # 차이(GJ)
+    diff_num = (new_pivot[common_date_cols].values.astype(float) -
+                old_pivot[common_date_cols].values.astype(float))
+    diff_pivot = old_pivot[["정산그룹","정산항목"]].copy()
+    for j, col in enumerate(common_date_cols):
+        diff_pivot[col] = diff_num[:, j]
 
-    common_date_cols = sorted(set(old_pivot.columns) & set(new_pivot.columns))
-
-    diff_num = (
-        new_pivot[common_date_cols].values.astype(float) -
-        old_pivot[common_date_cols].values.astype(float)
-    )
-    diff_pivot = pd.DataFrame(diff_num, index=old_pivot.index, columns=common_date_cols)
-
-    st.dataframe(
-        style_pivot_flat(diff_pivot, new_rtypes, gradient=True, diff_mode=True)
-        .format(formatter="{:+,.0f}"),
-        use_container_width=True, height=590,
-    )
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
-    # ── 차이율(%) 피벗
-    st.markdown('<div class="sub">📋 차이율 (%, 신규/이전 기준) — 클수록 진한 색상</div>', unsafe_allow_html=True)
-
+    # 차이율(%)
     old_num = old_pivot[common_date_cols].values.astype(float)
     with np.errstate(divide="ignore", invalid="ignore"):
         pct_num = np.where(old_num != 0, diff_num / old_num * 100, np.nan)
+    pct_pivot = old_pivot[["정산그룹","정산항목"]].copy()
+    for j, col in enumerate(common_date_cols):
+        pct_pivot[col] = pct_num[:, j]
 
-    pct_pivot = pd.DataFrame(pct_num, index=old_pivot.index, columns=common_date_cols)
+    # ── 이전방식
+    st.markdown('<div class="sub">📋 이전방식 — 상품별 월별 공급량 (GJ)</div>', unsafe_allow_html=True)
+    st.html(build_html_pivot(
+        old_pivot, old_rtypes,
+        fmt_func=lambda v: f"{v:,.0f}",
+        diff_mode=False, gradient=True,
+    ))
 
-    st.dataframe(
-        style_pivot_flat(pct_pivot, new_rtypes, gradient=True, diff_mode=True)
-        .format(formatter="{:+.2f}%", na_rep="-"),
-        use_container_width=True, height=590,
-    )
+    # ── 신규방식
+    st.markdown('<div class="sub">📋 신규방식 — 상품별 월별 공급량 (GJ)</div>', unsafe_allow_html=True)
+    st.html(build_html_pivot(
+        new_pivot, new_rtypes,
+        fmt_func=lambda v: f"{v:,.0f}",
+        diff_mode=False, gradient=True,
+    ))
 
-    # 다운로드 (인덱스 포함 유지)
+    # ── 차이(GJ)
+    st.markdown('<div class="sub">📋 차이 (신규 − 이전, GJ) — 클수록 진한 색상</div>', unsafe_allow_html=True)
+    st.html(build_html_pivot(
+        diff_pivot, new_rtypes,
+        fmt_func=lambda v: f"{v:+,.0f}",
+        diff_mode=True, gradient=True,
+    ))
+
+    # ── 차이율(%)
+    st.markdown('<div class="sub">📋 차이율 (%, 신규/이전 기준) — 클수록 진한 색상</div>', unsafe_allow_html=True)
+    def fmt_pct(v):
+        if np.isnan(v): return "-"
+        return f"{v:+.2f}%"
+    st.html(build_html_pivot(
+        pct_pivot, new_rtypes,
+        fmt_func=fmt_pct,
+        diff_mode=True, gradient=True,
+    ))
+
+    # ── 엑셀 다운로드
     buf_matrix = BytesIO()
     with pd.ExcelWriter(buf_matrix, engine="openpyxl") as w:
-        old_pivot.to_excel(w, sheet_name="이전방식", index=True)
-        new_pivot.to_excel(w, sheet_name="신규방식", index=True)
-        diff_pivot.to_excel(w, sheet_name="차이_GJ", index=True)
-        pct_pivot.to_excel(w, sheet_name="차이율_%", index=True)
+        old_pivot.to_excel(w, sheet_name="이전방식", index=False)
+        new_pivot.to_excel(w, sheet_name="신규방식", index=False)
+        diff_pivot.to_excel(w, sheet_name="차이_GJ", index=False)
+        pct_pivot.to_excel(w, sheet_name="차이율_%", index=False)
     st.download_button(
         "⬇️ 전체 매트릭스 엑셀 다운로드", data=buf_matrix.getvalue(),
         file_name=f"전체매트릭스_{y_start}_{y_end}.xlsx",
@@ -440,8 +552,281 @@ with tab0:
 
 
 # ══════════════════════════════════════════════
-# TAB 1, 2는 기존 코드와 동일하므로 생략 없이 원래 코드대로 포함하시면 됩니다. 
-# (코드 길이가 너무 길어질 것을 방지하기 위해 TAB 0과 함수 단위만 수정본으로 전달해 드렸으나, 
-# 기존 스크립트 그대로 아래쪽에 이어 붙이시면 완벽하게 작동합니다.)
+# TAB 1 : 상품별 상세 비교
 # ══════════════════════════════════════════════
-# (이하 기존 코드 TAB 1, 2 부분 동일 적용)
+with tab1:
+    st.markdown("""
+    <span class="badge-old">이전방식</span> 상품별 공급량 비율 적용 &nbsp;
+    <span class="badge-new">신규방식</span> 가스공사 비용 정산 비율 반영
+    <br><span style="color:#888; font-size:0.85rem; line-height:2.5;">
+    ※ 두 방식 모두 월별 총 공급량(구글시트 D2행)을 기준으로 상품별 배분합니다.</span>
+    <br><br>
+    """, unsafe_allow_html=True)
+
+    selected_product = st.selectbox(
+        "비교할 상품 선택", options=common_products,
+        index=common_products.index("개별난방용") if "개별난방용" in common_products else 0,
+    )
+
+    old_prod = old_result[old_result["상품"] == selected_product].set_index("연월")["공급량_GJ"]
+    new_prod = new_result[new_result["상품"] == selected_product].set_index("연월")["공급량_GJ"]
+    old_yr_p = old_prod.groupby(old_prod.index.year).sum()
+    new_yr_p = new_prod.groupby(new_prod.index.year).sum()
+    years_p  = sorted(set(old_yr_p.index) | set(new_yr_p.index))
+    old_vals = [old_yr_p.get(y, 0) for y in years_p]
+    new_vals = [new_yr_p.get(y, 0) for y in years_p]
+    pct_list = [(n-o)/o*100 if o else 0.0 for o,n in zip(old_vals, new_vals)]
+
+    # 연도별 막대
+    st.markdown(f'<div class="sub">📊 연도별 비교 — {selected_product} (GJ)</div>', unsafe_allow_html=True)
+    max_val = max(max(old_vals, default=1), max(new_vals, default=1))
+    fig_cmp_yr = go.Figure()
+    fig_cmp_yr.add_trace(go.Bar(
+        x=[str(y) for y in years_p], y=old_vals,
+        name="이전방식", marker_color="#2c5f8a",
+        hovertemplate="이전방식<br>%{x}년<br>%{y:,.0f} GJ<extra></extra>",
+    ))
+    fig_cmp_yr.add_trace(go.Bar(
+        x=[str(y) for y in years_p], y=new_vals,
+        name="신규방식", marker_color="#e8501a",
+        hovertemplate="신규방식<br>%{x}년<br>%{y:,.0f} GJ<extra></extra>",
+    ))
+    annotations = []
+    for y, pct, nv in zip(years_p, pct_list, new_vals):
+        sign  = "+" if pct >= 0 else ""
+        color = "#e8501a" if pct >= 0 else "#2c5f8a"
+        annotations.append(dict(
+            x=str(y), y=nv + max_val * 0.02,
+            text=f"<b>{sign}{pct:.1f}%</b>",
+            showarrow=False, font=dict(size=13, color=color),
+            xanchor="center", yanchor="bottom",
+        ))
+    fig_cmp_yr.update_layout(
+        barmode="group", height=460,
+        xaxis_title="연도", yaxis_title="공급량 (GJ)",
+        yaxis=dict(range=[0, max_val*1.15], showgrid=True, gridcolor="#ebebeb"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=70,r=20,t=70,b=40), annotations=annotations,
+    )
+    st.plotly_chart(fig_cmp_yr, use_container_width=True)
+
+    # 월별 추이 라인
+    st.markdown(f'<div class="sub">📈 월별 추이 비교 — {selected_product} (GJ)</div>', unsafe_allow_html=True)
+    st.caption("💡 마우스 휠: 확대/축소 | 드래그: 이동")
+    fig_cmp_mo = go.Figure()
+    fig_cmp_mo.add_trace(go.Scatter(
+        x=old_prod.index, y=old_prod.values, name="이전방식",
+        mode="lines", line=dict(color="#2c5f8a", width=2),
+        hovertemplate="이전방식<br>%{x|%Y-%m}<br>%{y:,.0f} GJ<extra></extra>",
+    ))
+    fig_cmp_mo.add_trace(go.Scatter(
+        x=new_prod.index, y=new_prod.values, name="신규방식",
+        mode="lines", line=dict(color="#e8501a", width=2, dash="dot"),
+        hovertemplate="신규방식<br>%{x|%Y-%m}<br>%{y:,.0f} GJ<extra></extra>",
+    ))
+    fig_cmp_mo.update_layout(
+        height=400, xaxis_title="연월", yaxis_title="공급량 (GJ)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=70,r=20,t=50,b=40), dragmode="pan",
+    )
+    fig_cmp_mo.update_yaxes(showgrid=True, gridcolor="#ebebeb", fixedrange=False)
+    fig_cmp_mo.update_xaxes(fixedrange=False)
+    st.plotly_chart(fig_cmp_mo, use_container_width=True,
+        config={"scrollZoom":True,"displayModeBar":True,
+                "modeBarButtonsToAdd":["pan2d"],
+                "modeBarButtonsToRemove":["lasso2d","select2d"]})
+
+    st.markdown("---")
+
+    # 특정 연도 월별 비교
+    st.markdown(f'<div class="sub">📊 특정 연도 월별 비교 — {selected_product} (GJ)</div>', unsafe_allow_html=True)
+    avail_years = sorted(set(old_prod.index.year) & set(new_prod.index.year))
+    if not avail_years:
+        st.info("공통 연도 데이터가 없습니다.")
+    else:
+        sel_year = st.selectbox("연도 선택", options=avail_years,
+            index=len(avail_years)-1, key="sel_year_monthly")
+
+        old_yr_total_v = old_yr_p.get(sel_year, 0)
+        new_yr_total_v = new_yr_p.get(sel_year, 0)
+        yr_diff = new_yr_total_v - old_yr_total_v
+        yr_pct  = yr_diff / old_yr_total_v * 100 if old_yr_total_v else 0
+        sign_yr = "+" if yr_pct >= 0 else ""
+        pct_col = "#e8501a" if yr_pct >= 0 else "#2c5f8a"
+
+        st.markdown(f"""
+        <div style="display:flex; gap:1rem; margin-bottom:1rem;">
+            <div style="flex:1; background:#f4f8fc; border-left:4px solid #2c5f8a; padding:0.8rem 1.2rem; border-radius:4px;">
+                <div style="font-size:0.8rem; color:#666;">이전방식 ({sel_year}년 합계)</div>
+                <div style="font-size:1.3rem; font-weight:700; color:#2c5f8a;">{old_yr_total_v:,.0f} GJ</div>
+            </div>
+            <div style="flex:1; background:#fff4f0; border-left:4px solid #e8501a; padding:0.8rem 1.2rem; border-radius:4px;">
+                <div style="font-size:0.8rem; color:#666;">신규방식 ({sel_year}년 합계)</div>
+                <div style="font-size:1.3rem; font-weight:700; color:#e8501a;">{new_yr_total_v:,.0f} GJ</div>
+            </div>
+            <div style="flex:1; background:#f9f9f9; border-left:4px solid {pct_col}; padding:0.8rem 1.2rem; border-radius:4px;">
+                <div style="font-size:0.8rem; color:#666;">{sel_year}년 전체 차이</div>
+                <div style="font-size:1.5rem; font-weight:800; color:{pct_col};">{sign_yr}{yr_pct:.2f}%</div>
+                <div style="font-size:0.8rem; color:#888;">{sign_yr}{yr_diff:,.0f} GJ</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        MONTH_KR = ["1월","2월","3월","4월","5월","6월",
+                     "7월","8월","9월","10월","11월","12월"]
+        old_mo = old_prod[old_prod.index.year == sel_year].copy()
+        new_mo = new_prod[new_prod.index.year == sel_year].copy()
+        old_mo.index = old_mo.index.month
+        new_mo.index = new_mo.index.month
+        old_mo_vals = [old_mo.get(m, 0) for m in range(1, 13)]
+        new_mo_vals = [new_mo.get(m, 0) for m in range(1, 13)]
+        mo_pct = [(n-o)/o*100 if o else 0.0 for o,n in zip(old_mo_vals, new_mo_vals)]
+        max_mo = max(max(old_mo_vals, default=1), max(new_mo_vals, default=1))
+
+        fig_mo_yr = go.Figure()
+        fig_mo_yr.add_trace(go.Bar(
+            x=MONTH_KR, y=old_mo_vals, name="이전방식", marker_color="#2c5f8a",
+            hovertemplate="이전방식<br>%{x}<br>%{y:,.0f} GJ<extra></extra>",
+        ))
+        fig_mo_yr.add_trace(go.Bar(
+            x=MONTH_KR, y=new_mo_vals, name="신규방식", marker_color="#e8501a",
+            hovertemplate="신규방식<br>%{x}<br>%{y:,.0f} GJ<extra></extra>",
+        ))
+        mo_ann = []
+        for m, pct, nv in zip(MONTH_KR, mo_pct, new_mo_vals):
+            sign  = "+" if pct >= 0 else ""
+            color = "#e8501a" if pct >= 0 else "#2c5f8a"
+            mo_ann.append(dict(
+                x=m, y=nv + max_mo * 0.02,
+                text=f"<b>{sign}{pct:.1f}%</b>",
+                showarrow=False, font=dict(size=13, color=color),
+                xanchor="center", yanchor="bottom",
+            ))
+        fig_mo_yr.update_layout(
+            barmode="group", height=420,
+            title=dict(text=f"{sel_year}년 월별 비교 — {selected_product}", font=dict(size=15)),
+            xaxis_title="월", yaxis_title="공급량 (GJ)",
+            yaxis=dict(range=[0, max_mo*1.18], showgrid=True, gridcolor="#ebebeb"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02),
+            plot_bgcolor="white", paper_bgcolor="white",
+            margin=dict(l=70,r=20,t=80,b=40), annotations=mo_ann,
+        )
+        st.plotly_chart(fig_mo_yr, use_container_width=True)
+
+        tbl_mo_yr = pd.DataFrame({
+            "이전방식_GJ": old_mo_vals, "신규방식_GJ": new_mo_vals,
+            "차이_GJ": [n-o for o,n in zip(old_mo_vals, new_mo_vals)],
+            "차이(%)": mo_pct,
+        }, index=MONTH_KR)
+        tbl_mo_yr.index.name = "월"
+        subtotal_mo = pd.DataFrame([{
+            "이전방식_GJ": sum(old_mo_vals), "신규방식_GJ": sum(new_mo_vals),
+            "차이_GJ": sum(new_mo_vals)-sum(old_mo_vals),
+            "차이(%)": (sum(new_mo_vals)-sum(old_mo_vals))/sum(old_mo_vals)*100 if sum(old_mo_vals) else 0.0,
+        }], index=[SUBTOTAL_LABEL])
+        subtotal_mo.index.name = "월"
+        tbl_mo_full = pd.concat([tbl_mo_yr, subtotal_mo])
+        st.dataframe(
+            tbl_mo_full.style
+                .format({"이전방식_GJ":"{:,.1f}","신규방식_GJ":"{:,.1f}",
+                         "차이_GJ":"{:,.1f}","차이(%)":"{:+.2f}%"})
+                .apply(style_subtotal_any, axis=None)
+                .map(color_pct, subset=["차이(%)"]),
+            use_container_width=True,
+        )
+
+    # 연도별 비교 테이블 (소계 없음)
+    st.markdown(f'<div class="sub">📋 연도별 비교 테이블 — {selected_product}</div>', unsafe_allow_html=True)
+    tbl_cmp = pd.DataFrame({
+        "이전방식_GJ": old_yr_p, "신규방식_GJ": new_yr_p,
+    }).fillna(0).round(1)
+    tbl_cmp["차이_GJ"] = (tbl_cmp["신규방식_GJ"] - tbl_cmp["이전방식_GJ"]).round(1)
+    tbl_cmp["차이(%)"] = (
+        tbl_cmp["차이_GJ"] / tbl_cmp["이전방식_GJ"].replace(0, float("nan")) * 100
+    ).round(2)
+    tbl_cmp.index.name = "연도"
+    st.dataframe(
+        tbl_cmp.style
+            .format({"이전방식_GJ":"{:,.1f}","신규방식_GJ":"{:,.1f}",
+                     "차이_GJ":"{:,.1f}","차이(%)":"{:+.2f}%"})
+            .map(color_pct, subset=["차이(%)"]),
+        use_container_width=True,
+    )
+    buf_cmp = BytesIO()
+    with pd.ExcelWriter(buf_cmp, engine="openpyxl") as w:
+        tbl_cmp.to_excel(w, sheet_name=f"{selected_product}_비교")
+    st.download_button(
+        f"⬇️ {selected_product} 비교 엑셀 다운로드", data=buf_cmp.getvalue(),
+        file_name=f"비교_{selected_product}_{y_start}_{y_end}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_cmp",
+    )
+
+
+# ══════════════════════════════════════════════
+# TAB 2 : 구성비 및 raw 데이터 확인
+# ══════════════════════════════════════════════
+with tab2:
+    sub1, sub2, sub3 = st.tabs([
+        "📋 구성비 (신규방식)",
+        "🗃️ 상품별 공급량 원본 (신규방식)",
+        "📅 월별 총 공급량 (구글시트 D2)",
+    ])
+
+    with sub1:
+        st.markdown('<div class="sub">구성비 (%) — 가스공사 비용 정산 비율</div>', unsafe_allow_html=True)
+        disp_ratio = ratio_df.copy()
+        disp_ratio = disp_ratio[[c for c in disp_ratio.columns
+                                  if pd.notna(c) and y_start <= c.year <= y_end]]
+        disp_ratio.columns = [c.strftime("%Y-%m") for c in disp_ratio.columns]
+        subtotal_r = pd.DataFrame([disp_ratio.sum(numeric_only=True)], index=[SUBTOTAL_LABEL])
+        subtotal_r.index.name = disp_ratio.index.name
+        disp_ratio_full = pd.concat([disp_ratio, subtotal_r])
+        st.dataframe(
+            disp_ratio_full.style.format("{:.4f}").apply(style_subtotal_any, axis=None),
+            use_container_width=True, height=460,
+        )
+        buf_r = BytesIO()
+        with pd.ExcelWriter(buf_r, engine="openpyxl") as w:
+            disp_ratio_full.to_excel(w, sheet_name="구성비")
+        st.download_button("⬇️ 구성비 엑셀 다운로드", data=buf_r.getvalue(),
+            file_name=f"구성비_{y_start}_{y_end}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_ratio")
+
+    with sub2:
+        st.markdown('<div class="sub">상품별 월별 공급량 (GJ) — 구글시트 원본</div>', unsafe_allow_html=True)
+        disp_sup = supply_df.copy()
+        disp_sup = disp_sup[[c for c in disp_sup.columns
+                              if pd.notna(c) and y_start <= c.year <= y_end]]
+        disp_sup.columns = [c.strftime("%Y-%m") for c in disp_sup.columns]
+        subtotal_s = pd.DataFrame([disp_sup.sum(numeric_only=True)], index=[SUBTOTAL_LABEL])
+        subtotal_s.index.name = disp_sup.index.name
+        disp_sup_full = pd.concat([disp_sup, subtotal_s])
+        st.dataframe(
+            disp_sup_full.style.format("{:,.1f}").apply(style_subtotal_any, axis=None),
+            use_container_width=True, height=460,
+        )
+        buf_s = BytesIO()
+        with pd.ExcelWriter(buf_s, engine="openpyxl") as w:
+            disp_sup_full.to_excel(w, sheet_name="상품별공급량")
+        st.download_button("⬇️ 상품별 공급량 엑셀 다운로드", data=buf_s.getvalue(),
+            file_name=f"상품별공급량_{y_start}_{y_end}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_sup")
+
+    with sub3:
+        st.markdown('<div class="sub">월별 총 공급량 (GJ) — 구글시트 D2행</div>', unsafe_allow_html=True)
+        st.caption("구글시트 2행의 총 공급량(GJ) — 신규방식 산출 기준")
+        disp_total = total_filtered.copy()
+        disp_total["연월"] = pd.to_datetime(disp_total["연월"]).dt.strftime("%Y-%m")
+        disp_total["총공급량_GJ"] = disp_total["총공급량_GJ"].round(1)
+        st.dataframe(
+            disp_total.style.format({"총공급량_GJ": "{:,.1f}"}),
+            use_container_width=True, height=400,
+        )
+        buf_t = BytesIO()
+        with pd.ExcelWriter(buf_t, engine="openpyxl") as w:
+            disp_total.to_excel(w, sheet_name="월별총공급량", index=False)
+        st.download_button("⬇️ 월별 총 공급량 엑셀 다운로드", data=buf_t.getvalue(),
+            file_name=f"월별총공급량_{y_start}_{y_end}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_total")
