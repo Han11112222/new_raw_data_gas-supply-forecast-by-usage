@@ -382,9 +382,10 @@ with tab0:
     # ── 이전방식 피벗
     st.markdown('<div class="sub">📋 이전방식 — 상품별 월별 공급량 (GJ)</div>', unsafe_allow_html=True)
     old_pivot, old_rtypes = build_pivot_flat(old_result, "공급량_GJ")
+    _old_num_cols = [c for c in old_pivot.columns if c not in ("정산그룹", "정산항목")]
     st.dataframe(
         style_pivot_flat(old_pivot, old_rtypes, gradient=True, diff_mode=False)
-        .format("{:,.0f}"),
+        .format(subset=_old_num_cols, formatter="{:,.0f}"),
         use_container_width=True, height=590,
     )
 
@@ -393,9 +394,10 @@ with tab0:
     # ── 신규방식 피벗
     st.markdown('<div class="sub">📋 신규방식 — 상품별 월별 공급량 (GJ)</div>', unsafe_allow_html=True)
     new_pivot, new_rtypes = build_pivot_flat(new_result, "공급량_GJ")
+    _new_num_cols = [c for c in new_pivot.columns if c not in ("정산그룹", "정산항목")]
     st.dataframe(
         style_pivot_flat(new_pivot, new_rtypes, gradient=True, diff_mode=False)
-        .format("{:,.0f}"),
+        .format(subset=_new_num_cols, formatter="{:,.0f}"),
         use_container_width=True, height=590,
     )
 
