@@ -5,9 +5,6 @@ from io import BytesIO, StringIO
 import requests
 import numpy as np
 
-# ──────────────────────────────────────────────
-# 페이지 설정
-# ──────────────────────────────────────────────
 st.set_page_config(
     page_title="도시가스 상품별 공급량 분석",
     page_icon="🔥",
@@ -28,10 +25,6 @@ h1 { color: #1a3c5e; border-bottom: 3px solid #e8501a; padding-bottom: 0.3rem; }
     font-size:0.92rem; line-height:2.2;
 }
 .info-row { display:grid; grid-template-columns:90px 1fr; align-items:center; gap:0 8px; }
-.metric-card { background:#fff; border-radius:8px; padding:0.8rem 1rem;
-               border:1px solid #e0e8f0; text-align:center; }
-.metric-label { font-size:0.78rem; color:#666; margin-bottom:4px; }
-.metric-val   { font-size:1.1rem; font-weight:700; color:#1a3c5e; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -42,7 +35,6 @@ NEW_GSHEET_ID  = "1gIhArPlLBJ9fwlaqXtZWxiKlSK9hbRuz6HcDw_Yf7Is"
 NEW_GSHEET_URL = f"https://docs.google.com/spreadsheets/d/{NEW_GSHEET_ID}/export?format=csv&gid=0"
 GITHUB_OLD_URL = "https://raw.githubusercontent.com/Han11112222/new_raw_data_gas-supply-forecast-by-usage/main/상품별공급량_MJ실적.xlsx"
 
-# 정산그룹 구조 (이미지와 동일)
 HOUSING_PRODUCTS = ["취사용", "개별난방용", "중앙난방용", "자가열전용"]
 OTHER_PRODUCTS   = ["일반용", "냉난방공조용", "업무난방용", "산업용",
                     "수송용", "열병합용", "연료전지용", "열전용설비용", "주한미군"]
@@ -163,116 +155,128 @@ def build_new_result(supply_df, ratio_df, y_start, y_end):
     return df
 
 # ──────────────────────────────────────────────
-# 피벗 테이블 빌더 (이미지 양식: 정산그룹+소계+합계)
+# 피벗 빌더: 정산그룹 병합 표시용 (단일 인덱스)
+# 행 순서: 주택용×4 + 소계 + 기타×9 + 소계 + 합계
+# 정산그룹 열: 주택용(첫 행만), 빈칸×3, 소계, 기타(첫 행만), 빈칸×8, 소계, (빈칸)합계
 # ──────────────────────────────────────────────
-def build_pivot_table(df_long: pd.DataFrame, value_col: str = "공급량_GJ") -> pd.DataFrame:
+def build_pivot_flat(df_long: pd.DataFrame, value_col: str = "공급량_GJ"):
     """
-    df_long: columns = [연월, 상품, value_col]
-    반환: MultiIndex 피벗 (정산그룹/정산항목 행 구조 + 소계/합계)
-    가로: 연도-월 (YYYY-MM)
+    반환:
+      display_df  : 표시용 DataFrame (정산그룹, 정산항목, 날짜열...)
+      row_types   : list[str] — 'data'/'subtotal'/'total'
+      group_labels: list[str] — 정산그룹 열에 넣을 텍스트 (병합 표현)
     """
     pivot = (
         df_long.pivot_table(index="상품", columns="연월", values=value_col, aggfunc="sum")
         .fillna(0)
     )
-    # 날짜 컬럼 정렬
     pivot = pivot[sorted(pivot.columns)]
-    pivot.columns = [c.strftime("%Y-%m") for c in pivot.columns]
+    date_cols = [c.strftime("%Y-%m") for c in pivot.columns]
+    pivot.columns = date_cols
 
-    rows_out = []
+    rows_data   = []   # (group_label, item_label, row_type, Series)
 
     for group, products in [("주택용", HOUSING_PRODUCTS), ("기타", OTHER_PRODUCTS)]:
-        for p in products:
-            if p in pivot.index:
-                row = pivot.loc[p].copy()
-            else:
-                row = pd.Series(0, index=pivot.columns)
-            row.name = p
-            rows_out.append(("정산그룹", group, "정산항목", p, "data", row))
+        for i, p in enumerate(products):
+            row = pivot.loc[p] if p in pivot.index else pd.Series(0, index=date_cols)
+            # 정산그룹: 첫 행만 표시, 나머지 빈칸
+            g_label = group if i == 0 else ""
+            rows_data.append((g_label, p, "data", row))
 
         # 소계
-        sub_products = [p for p in products if p in pivot.index]
-        sub_row = pivot.loc[sub_products].sum() if sub_products else pd.Series(0, index=pivot.columns)
-        sub_row.name = SUBTOTAL_LABEL
-        rows_out.append(("정산그룹", group, "정산항목", SUBTOTAL_LABEL, "subtotal", sub_row))
+        sub_ps  = [p for p in products if p in pivot.index]
+        sub_row = pivot.loc[sub_ps].sum() if sub_ps else pd.Series(0, index=date_cols)
+        rows_data.append(("", SUBTOTAL_LABEL, "subtotal", sub_row))
 
     # 합계
     total_row = pivot.sum()
-    total_row.name = TOTAL_LABEL
-    rows_out.append(("정산그룹", "전체", "정산항목", TOTAL_LABEL, "total", total_row))
+    rows_data.append(("", TOTAL_LABEL, "total", total_row))
 
-    # DataFrame 조립
-    index_tuples = [(r[1], r[3]) for r in rows_out]
-    index = pd.MultiIndex.from_tuples(index_tuples, names=["정산그룹", "정산항목"])
-    data  = pd.DataFrame([r[5] for r in rows_out], index=index, columns=pivot.columns)
-    row_types = [r[4] for r in rows_out]  # data / subtotal / total
+    group_labels = [r[0] for r in rows_data]
+    item_labels  = [r[1] for r in rows_data]
+    row_types    = [r[2] for r in rows_data]
+    data_matrix  = pd.DataFrame([r[3].values for r in rows_data],
+                                 columns=date_cols)
 
-    return data, row_types
+    display_df = pd.concat([
+        pd.DataFrame({"정산그룹": group_labels, "정산항목": item_labels}),
+        data_matrix,
+    ], axis=1).set_index(["정산그룹", "정산항목"])
+
+    return display_df, row_types
 
 # ──────────────────────────────────────────────
-# 스타일러: 그라데이션 + 소계/합계 강조
+# 그라데이션 스타일러
 # ──────────────────────────────────────────────
-def style_pivot(df: pd.DataFrame, row_types: list,
-                gradient: bool = False,
-                positive_cmap: bool = True) -> pd.io.formats.style.Styler:
+def style_pivot_flat(df: pd.DataFrame, row_types: list,
+                     gradient: bool = False,
+                     diff_mode: bool = False) -> "pd.io.formats.style.Styler":
     """
-    row_types: list of 'data'/'subtotal'/'total' per row
-    gradient : 값 크기에 따라 배경 그라데이션
-    positive_cmap: True=양수 오렌지계, False=절댓값 기준 파랑계
+    diff_mode=False : 파랑 계열 단방향 그라데이션 (공급량)
+    diff_mode=True  : 양수=오렌지, 음수=파랑 (차이/차이율)
+    소계/합계 행은 항상 강조 배경
     """
     n_rows, n_cols = df.shape
-    bg_styles  = [[""] * n_cols for _ in range(n_rows)]
-    txt_styles = [[""] * n_cols for _ in range(n_rows)]
+    bg  = [[""] * n_cols for _ in range(n_rows)]
+    txt = [[""] * n_cols for _ in range(n_rows)]
 
-    # 그라데이션 계산 (data 행만)
+    # 그라데이션 기준값: data 행 숫자만
     if gradient:
         data_mask = [t == "data" for t in row_types]
         data_vals = df.values[data_mask].astype(float)
-        abs_max = np.nanmax(np.abs(data_vals)) if data_vals.size > 0 else 1
+        if diff_mode:
+            abs_max = np.nanmax(np.abs(data_vals)) if data_vals.size > 0 else 1
+        else:
+            abs_max = np.nanmax(data_vals) if data_vals.size > 0 else 1
 
     for i, rtype in enumerate(row_types):
         if rtype == "subtotal":
             for j in range(n_cols):
-                bg_styles[i][j]  = "background-color:#ddeaf8;"
-                txt_styles[i][j] = "font-weight:bold; color:#1a3c5e;"
+                bg[i][j]  = "background-color:#ddeaf8;"
+                txt[i][j] = "font-weight:bold; color:#1a3c5e;"
         elif rtype == "total":
             for j in range(n_cols):
-                bg_styles[i][j]  = "background-color:#c5d8f0;"
-                txt_styles[i][j] = "font-weight:bold; color:#1a3c5e;"
-        elif gradient:
+                bg[i][j]  = "background-color:#c5d8f0;"
+                txt[i][j] = "font-weight:bold; color:#1a3c5e;"
+        elif gradient and abs_max > 0:
             for j in range(n_cols):
-                val = float(df.iloc[i, j])
-                if abs_max == 0:
+                try:
+                    val = float(df.iloc[i, j])
+                except Exception:
                     continue
-                intensity = min(abs(val) / abs_max, 1.0)
-                alpha = 0.08 + intensity * 0.55   # 0.08 ~ 0.63
-                if positive_cmap:
-                    # 파랑 계열 (양수)
-                    r = int(44  + (1 - intensity) * 180)
-                    g = int(95  + (1 - intensity) * 130)
-                    b = int(142 + (1 - intensity) * 80)
-                    bg_styles[i][j] = f"background-color:rgba({r},{g},{b},{alpha:.2f});"
-                else:
-                    # 오렌지-레드 계열 (차이 절댓값)
+                if np.isnan(val):
+                    continue
+                if diff_mode:
+                    intensity = min(abs(val) / abs_max, 1.0)
+                    alpha = 0.07 + intensity * 0.58
                     if val > 0:
-                        bg_styles[i][j] = f"background-color:rgba(232,80,26,{alpha:.2f});"
-                        txt_styles[i][j] = "color:#7a1a00;" if intensity > 0.5 else ""
+                        bg[i][j]  = f"background-color:rgba(232,80,26,{alpha:.2f});"
+                        if intensity > 0.55:
+                            txt[i][j] = "color:#6b1500;"
                     elif val < 0:
-                        bg_styles[i][j] = f"background-color:rgba(44,95,138,{alpha:.2f});"
-                        txt_styles[i][j] = "color:#0a2a44;" if intensity > 0.5 else ""
+                        bg[i][j]  = f"background-color:rgba(44,95,138,{alpha:.2f});"
+                        if intensity > 0.55:
+                            txt[i][j] = "color:#0a1f30;"
+                else:
+                    intensity = min(val / abs_max, 1.0)
+                    alpha = 0.05 + intensity * 0.55
+                    r = int(44  + (1 - intensity) * 170)
+                    g = int(95  + (1 - intensity) * 120)
+                    b = int(138 + (1 - intensity) * 90)
+                    bg[i][j] = f"background-color:rgba({r},{g},{b},{alpha:.2f});"
+                    if intensity > 0.6:
+                        txt[i][j] = "color:#fff;"
 
-    def apply_bg(df_):
-        return pd.DataFrame(bg_styles, index=df_.index, columns=df_.columns)
+    def _apply_bg(df_):
+        return pd.DataFrame(bg, index=df_.index, columns=df_.columns)
+    def _apply_txt(df_):
+        return pd.DataFrame(txt, index=df_.index, columns=df_.columns)
 
-    def apply_txt(df_):
-        return pd.DataFrame(txt_styles, index=df_.index, columns=df_.columns)
-
-    styler = df.style.apply(apply_bg, axis=None).apply(apply_txt, axis=None)
-    return styler
+    return df.style.apply(_apply_bg, axis=None).apply(_apply_txt, axis=None)
 
 def color_pct(val):
     if pd.isna(val): return ""
-    return "color: #e8501a;" if val >= 0 else "color: #2c5f8a;"
+    return "color:#e8501a;" if val >= 0 else "color:#2c5f8a;"
 
 def style_subtotal_any(df):
     styles = pd.DataFrame("", index=df.index, columns=df.columns)
@@ -353,7 +357,7 @@ if new_result.empty:
 common_products = [p for p in OLD_COL_MAP.keys() if p in new_result["상품"].unique()]
 
 # ══════════════════════════════════════════════
-# TAB 구성
+# TAB
 # ══════════════════════════════════════════════
 tab0, tab1, tab2 = st.tabs([
     "📊 전체 비교 (매트릭스)",
@@ -366,99 +370,53 @@ tab0, tab1, tab2 = st.tabs([
 # ══════════════════════════════════════════════
 with tab0:
 
-    # 상단 요약 카드
-    old_grand = old_result["공급량_GJ"].sum()
-    new_grand = new_result["공급량_GJ"].sum()
-    diff_grand_gj  = new_grand - old_grand
-    diff_grand_pct = diff_grand_gj / old_grand * 100 if old_grand else 0
-    sign_g = "+" if diff_grand_pct >= 0 else ""
-    card_color = "#e8501a" if diff_grand_pct >= 0 else "#2c5f8a"
-
-    ca, cb, cc, cd = st.columns(4)
-    for col, label, val, unit in [
-        (ca, "이전방식 합계", f"{old_grand:,.0f}", "GJ"),
-        (cb, "신규방식 합계", f"{new_grand:,.0f}", "GJ"),
-        (cc, f"차이 (GJ)", f"{sign_g}{diff_grand_gj:,.0f}", "GJ"),
-        (cd, f"차이 (%)", f"{sign_g}{diff_grand_pct:.2f}%", "전체 대비"),
-    ]:
-        col.markdown(f"""<div class="metric-card">
-            <div class="metric-label">{label}</div>
-            <div class="metric-val" style="color:{card_color if 'GJ' not in label and '이전' not in label and '신규' not in label else '#1a3c5e'};">{val}</div>
-            <div style="font-size:0.75rem;color:#aaa;">{unit}</div>
-        </div>""", unsafe_allow_html=True)
-
-    st.markdown("<br>", unsafe_allow_html=True)
-
     # ── 이전방식 피벗
     st.markdown('<div class="sub">📋 이전방식 — 상품별 월별 공급량 (GJ)</div>', unsafe_allow_html=True)
-    old_pivot, old_rtypes = build_pivot_table(old_result, "공급량_GJ")
-    old_styler = (
-        style_pivot(old_pivot, old_rtypes, gradient=True, positive_cmap=True)
-        .format("{:,.0f}")
+    old_pivot, old_rtypes = build_pivot_flat(old_result, "공급량_GJ")
+    st.dataframe(
+        style_pivot_flat(old_pivot, old_rtypes, gradient=True, diff_mode=False)
+        .format("{:,.0f}"),
+        use_container_width=True, height=590,
     )
-    st.dataframe(old_styler, use_container_width=True, height=560)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── 신규방식 피벗
     st.markdown('<div class="sub">📋 신규방식 — 상품별 월별 공급량 (GJ)</div>', unsafe_allow_html=True)
-    new_pivot, new_rtypes = build_pivot_table(new_result, "공급량_GJ")
-    new_styler = (
-        style_pivot(new_pivot, new_rtypes, gradient=True, positive_cmap=True)
-        .format("{:,.0f}")
+    new_pivot, new_rtypes = build_pivot_flat(new_result, "공급량_GJ")
+    st.dataframe(
+        style_pivot_flat(new_pivot, new_rtypes, gradient=True, diff_mode=False)
+        .format("{:,.0f}"),
+        use_container_width=True, height=590,
     )
-    st.dataframe(new_styler, use_container_width=True, height=560)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── 차이(GJ) 피벗
     st.markdown('<div class="sub">📋 차이 (신규 − 이전, GJ) — 클수록 진한 색상</div>', unsafe_allow_html=True)
 
-    # 공통 컬럼만 사용해 차이 계산
     common_cols = sorted(set(old_pivot.columns) & set(new_pivot.columns))
-    diff_pivot  = new_pivot[common_cols].copy()
-    for idx in diff_pivot.index:
-        if idx in old_pivot.index:
-            diff_pivot.loc[idx] = new_pivot.loc[idx, common_cols].values - old_pivot.loc[idx, common_cols].values
-        else:
-            diff_pivot.loc[idx] = new_pivot.loc[idx, common_cols].values
+    diff_pivot  = new_pivot[common_cols].subtract(old_pivot[common_cols]).fillna(0)
 
-    diff_styler = (
-        style_pivot(diff_pivot, new_rtypes, gradient=True, positive_cmap=False)
-        .format("{:+,.0f}")
+    st.dataframe(
+        style_pivot_flat(diff_pivot, new_rtypes, gradient=True, diff_mode=True)
+        .format("{:+,.0f}"),
+        use_container_width=True, height=590,
     )
-    st.dataframe(diff_styler, use_container_width=True, height=560)
 
     st.markdown("<br>", unsafe_allow_html=True)
 
     # ── 차이율(%) 피벗
     st.markdown('<div class="sub">📋 차이율 (%, 신규/이전 기준) — 클수록 진한 색상</div>', unsafe_allow_html=True)
 
-    old_base_pivot = old_pivot[common_cols].copy().replace(0, float("nan"))
-    # data 행만 계산, subtotal/total 행은 별도
-    pct_pivot = diff_pivot.copy().astype(float)
-    for i, rtype in enumerate(new_rtypes):
-        idx = diff_pivot.index[i]
-        if rtype in ("subtotal", "total"):
-            old_val = old_pivot.loc[idx, common_cols].values
-            new_val = new_pivot.loc[idx, common_cols].values
-            with np.errstate(divide="ignore", invalid="ignore"):
-                pct_val = np.where(old_val != 0, (new_val - old_val) / old_val * 100, np.nan)
-            pct_pivot.loc[idx] = pct_val
-        else:
-            old_val = old_base_pivot.loc[idx, common_cols].values if idx in old_base_pivot.index else np.nan
-            new_val = new_pivot.loc[idx, common_cols].values
-            with np.errstate(divide="ignore", invalid="ignore"):
-                pct_val = np.where(~np.isnan(old_val) & (old_val != 0),
-                                   (new_val - old_val) / old_val * 100, np.nan)
-            pct_pivot.loc[idx] = pct_val
+    old_base = old_pivot[common_cols].replace(0, np.nan)
+    pct_pivot = (diff_pivot / old_base * 100).round(2)
 
-    # 차이율 그라데이션: 절댓값 기준 오렌지/파랑
-    pct_styler = (
-        style_pivot(pct_pivot, new_rtypes, gradient=True, positive_cmap=False)
-        .format("{:+.2f}%", na_rep="-")
+    st.dataframe(
+        style_pivot_flat(pct_pivot, new_rtypes, gradient=True, diff_mode=True)
+        .format("{:+.2f}%", na_rep="-"),
+        use_container_width=True, height=590,
     )
-    st.dataframe(pct_styler, use_container_width=True, height=560)
 
     # 다운로드
     buf_matrix = BytesIO()
@@ -476,7 +434,7 @@ with tab0:
 
 
 # ══════════════════════════════════════════════
-# TAB 1 : 이전방식 vs 신규방식 상세 비교 (상품별)
+# TAB 1 : 상품별 상세 비교
 # ══════════════════════════════════════════════
 with tab1:
     st.markdown("""
@@ -501,18 +459,17 @@ with tab1:
     new_vals = [new_yr_p.get(y, 0) for y in years_p]
     pct_list = [(n-o)/o*100 if o else 0.0 for o,n in zip(old_vals, new_vals)]
 
-    # 연도별 비교 막대
     st.markdown(f'<div class="sub">📊 연도별 비교 — {selected_product} (GJ)</div>', unsafe_allow_html=True)
     max_val = max(max(old_vals, default=1), max(new_vals, default=1))
     fig_cmp_yr = go.Figure()
     fig_cmp_yr.add_trace(go.Bar(
         x=[str(y) for y in years_p], y=old_vals,
-        name="이전방식 (총 공급량)", marker_color="#2c5f8a",
+        name="이전방식", marker_color="#2c5f8a",
         hovertemplate="이전방식<br>%{x}년<br>%{y:,.0f} GJ<extra></extra>",
     ))
     fig_cmp_yr.add_trace(go.Bar(
         x=[str(y) for y in years_p], y=new_vals,
-        name="신규방식 (총 공급량)", marker_color="#e8501a",
+        name="신규방식", marker_color="#e8501a",
         hovertemplate="신규방식<br>%{x}년<br>%{y:,.0f} GJ<extra></extra>",
     ))
     annotations = []
@@ -535,7 +492,6 @@ with tab1:
     )
     st.plotly_chart(fig_cmp_yr, use_container_width=True)
 
-    # 월별 추이 라인
     st.markdown(f'<div class="sub">📈 월별 추이 비교 — {selected_product} (GJ)</div>', unsafe_allow_html=True)
     st.caption("💡 마우스 휠: 확대/축소 | 드래그: 이동")
     fig_cmp_mo = go.Figure()
@@ -564,7 +520,6 @@ with tab1:
 
     st.markdown("---")
 
-    # 특정 연도 월별 비교
     st.markdown(f'<div class="sub">📊 특정 연도 월별 비교 — {selected_product} (GJ)</div>', unsafe_allow_html=True)
     avail_years = sorted(set(old_prod.index.year) & set(new_prod.index.year))
     if not avail_years:
@@ -611,11 +566,11 @@ with tab1:
 
         fig_mo_yr = go.Figure()
         fig_mo_yr.add_trace(go.Bar(
-            x=MONTH_KR, y=old_mo_vals, name="이전방식 (총 공급량)", marker_color="#2c5f8a",
+            x=MONTH_KR, y=old_mo_vals, name="이전방식", marker_color="#2c5f8a",
             hovertemplate="이전방식<br>%{x}<br>%{y:,.0f} GJ<extra></extra>",
         ))
         fig_mo_yr.add_trace(go.Bar(
-            x=MONTH_KR, y=new_mo_vals, name="신규방식 (총 공급량)", marker_color="#e8501a",
+            x=MONTH_KR, y=new_mo_vals, name="신규방식", marker_color="#e8501a",
             hovertemplate="신규방식<br>%{x}<br>%{y:,.0f} GJ<extra></extra>",
         ))
         mo_ann = []
@@ -639,7 +594,6 @@ with tab1:
         )
         st.plotly_chart(fig_mo_yr, use_container_width=True)
 
-        # 월별 비교 테이블 + 소계
         tbl_mo_yr = pd.DataFrame({
             "이전방식_GJ": old_mo_vals, "신규방식_GJ": new_mo_vals,
             "차이_GJ": [n-o for o,n in zip(old_mo_vals, new_mo_vals)],
@@ -662,7 +616,6 @@ with tab1:
             use_container_width=True,
         )
 
-    # 연도별 비교 테이블 (소계 없음)
     st.markdown(f'<div class="sub">📋 연도별 비교 테이블 — {selected_product}</div>', unsafe_allow_html=True)
     tbl_cmp = pd.DataFrame({
         "이전방식_GJ": old_yr_p, "신규방식_GJ": new_yr_p,
