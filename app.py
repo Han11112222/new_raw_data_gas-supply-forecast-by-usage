@@ -406,6 +406,40 @@ with st.sidebar:
     c1, c2 = st.columns(2)
     y_start = c1.number_input("시작", 2014, 2030, 2017)
     y_end   = c2.number_input("종료", 2014, 2030, 2025)
+    st.markdown("---")
+    st.markdown("#### 🔄 단위 변환")
+    use_m3 = st.toggle("천m³ 단위로 변환", value=False)
+    if use_m3:
+        calorific = st.number_input(
+            "열량 (MJ/m³)",
+            min_value=1.0, max_value=100.0,
+            value=42.563, step=0.001, format="%.3f",
+            help="GJ → 천m³ 변환: GJ ÷ 열량(MJ/m³) × 1,000"
+        )
+        st.caption(f"GJ ÷ {calorific:.3f} × 1,000 = 천m³")
+    else:
+        calorific = 42.563
+
+# ──────────────────────────────────────────────
+# 단위 변환 헬퍼
+# ──────────────────────────────────────────────
+def gj_to_unit(val: float) -> float:
+    """GJ → 천m³ 변환 (use_m3=True 일 때)"""
+    if use_m3:
+        return val / calorific * 1_000
+    return val
+
+def unit_label() -> str:
+    return "천m³" if use_m3 else "GJ"
+
+def fmt_unit(val: float, decimals: int = 0, sign: bool = False) -> str:
+    """단위 변환 적용 후 포맷 문자열 반환"""
+    import math
+    if math.isnan(val):
+        return "-"
+    v = gj_to_unit(val)
+    fmt = f"{{:+,.{decimals}f}}" if sign else f"{{:,.{decimals}f}}"
+    return fmt.format(v)
 
 # ──────────────────────────────────────────────
 # 메인
@@ -501,31 +535,34 @@ with tab0:
     for j, col in enumerate(common_date_cols):
         pct_pivot[col] = pct_num[:, j]
 
+    # ── 단위 레이블
+    _ul = unit_label()
+
     # ── 이전방식
-    st.markdown('<div class="sub">📋 이전방식 — 상품별 월별 공급량 (GJ)</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub">📋 이전방식 — 상품별 월별 공급량 ({_ul})</div>', unsafe_allow_html=True)
     st.html(build_html_pivot(
         old_pivot, old_rtypes,
-        fmt_func=lambda v: f"{v:,.0f}",
+        fmt_func=lambda v: fmt_unit(v, decimals=0),
         diff_mode=False, gradient=True,
     ))
 
     # ── 신규방식
-    st.markdown('<div class="sub">📋 신규방식 — 상품별 월별 공급량 (GJ)</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub">📋 신규방식 — 상품별 월별 공급량 ({_ul})</div>', unsafe_allow_html=True)
     st.html(build_html_pivot(
         new_pivot, new_rtypes,
-        fmt_func=lambda v: f"{v:,.0f}",
+        fmt_func=lambda v: fmt_unit(v, decimals=0),
         diff_mode=False, gradient=True,
     ))
 
-    # ── 차이(GJ)
-    st.markdown('<div class="sub">📋 차이 (신규 − 이전, GJ) — 클수록 진한 색상</div>', unsafe_allow_html=True)
+    # ── 차이(GJ or 천m³)
+    st.markdown(f'<div class="sub">📋 차이 (신규 − 이전, {_ul}) — 클수록 진한 색상</div>', unsafe_allow_html=True)
     st.html(build_html_pivot(
         diff_pivot, new_rtypes,
-        fmt_func=lambda v: f"{v:+,.0f}",
+        fmt_func=lambda v: fmt_unit(v, decimals=0, sign=True),
         diff_mode=True, gradient=True,
     ))
 
-    # ── 차이율(%)
+    # ── 차이율(%) — 단위 변환 불필요 (비율이므로)
     st.markdown('<div class="sub">📋 차이율 (%, 신규/이전 기준) — 클수록 진한 색상</div>', unsafe_allow_html=True)
     def fmt_pct(v):
         if np.isnan(v): return "-"
@@ -573,23 +610,27 @@ with tab1:
     old_yr_p = old_prod.groupby(old_prod.index.year).sum()
     new_yr_p = new_prod.groupby(new_prod.index.year).sum()
     years_p  = sorted(set(old_yr_p.index) | set(new_yr_p.index))
-    old_vals = [old_yr_p.get(y, 0) for y in years_p]
-    new_vals = [new_yr_p.get(y, 0) for y in years_p]
-    pct_list = [(n-o)/o*100 if o else 0.0 for o,n in zip(old_vals, new_vals)]
+    # 단위 변환 적용
+    old_vals = [gj_to_unit(old_yr_p.get(y, 0)) for y in years_p]
+    new_vals = [gj_to_unit(new_yr_p.get(y, 0)) for y in years_p]
+    old_vals_gj = [old_yr_p.get(y, 0) for y in years_p]
+    new_vals_gj = [new_yr_p.get(y, 0) for y in years_p]
+    pct_list = [(n-o)/o*100 if o else 0.0 for o,n in zip(old_vals_gj, new_vals_gj)]
+    _ul = unit_label()
 
     # 연도별 막대
-    st.markdown(f'<div class="sub">📊 연도별 비교 — {selected_product} (GJ)</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub">📊 연도별 비교 — {selected_product} ({_ul})</div>', unsafe_allow_html=True)
     max_val = max(max(old_vals, default=1), max(new_vals, default=1))
     fig_cmp_yr = go.Figure()
     fig_cmp_yr.add_trace(go.Bar(
         x=[str(y) for y in years_p], y=old_vals,
         name="이전방식", marker_color="#2c5f8a",
-        hovertemplate="이전방식<br>%{x}년<br>%{y:,.0f} GJ<extra></extra>",
+        hovertemplate=f"이전방식<br>%{{x}}년<br>%{{y:,.1f}} {_ul}<extra></extra>",
     ))
     fig_cmp_yr.add_trace(go.Bar(
         x=[str(y) for y in years_p], y=new_vals,
         name="신규방식", marker_color="#e8501a",
-        hovertemplate="신규방식<br>%{x}년<br>%{y:,.0f} GJ<extra></extra>",
+        hovertemplate=f"신규방식<br>%{{x}}년<br>%{{y:,.1f}} {_ul}<extra></extra>",
     ))
     annotations = []
     for y, pct, nv in zip(years_p, pct_list, new_vals):
@@ -603,7 +644,7 @@ with tab1:
         ))
     fig_cmp_yr.update_layout(
         barmode="group", height=460,
-        xaxis_title="연도", yaxis_title="공급량 (GJ)",
+        xaxis_title="연도", yaxis_title=f"공급량 ({_ul})",
         yaxis=dict(range=[0, max_val*1.15], showgrid=True, gridcolor="#ebebeb"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         plot_bgcolor="white", paper_bgcolor="white",
@@ -612,21 +653,23 @@ with tab1:
     st.plotly_chart(fig_cmp_yr, use_container_width=True)
 
     # 월별 추이 라인
-    st.markdown(f'<div class="sub">📈 월별 추이 비교 — {selected_product} (GJ)</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub">📈 월별 추이 비교 — {selected_product} ({_ul})</div>', unsafe_allow_html=True)
     st.caption("💡 마우스 휠: 확대/축소 | 드래그: 이동")
+    old_prod_disp = old_prod.apply(gj_to_unit)
+    new_prod_disp = new_prod.apply(gj_to_unit)
     fig_cmp_mo = go.Figure()
     fig_cmp_mo.add_trace(go.Scatter(
-        x=old_prod.index, y=old_prod.values, name="이전방식",
+        x=old_prod_disp.index, y=old_prod_disp.values, name="이전방식",
         mode="lines", line=dict(color="#2c5f8a", width=2),
-        hovertemplate="이전방식<br>%{x|%Y-%m}<br>%{y:,.0f} GJ<extra></extra>",
+        hovertemplate=f"이전방식<br>%{{x|%Y-%m}}<br>%{{y:,.1f}} {_ul}<extra></extra>",
     ))
     fig_cmp_mo.add_trace(go.Scatter(
-        x=new_prod.index, y=new_prod.values, name="신규방식",
+        x=new_prod_disp.index, y=new_prod_disp.values, name="신규방식",
         mode="lines", line=dict(color="#e8501a", width=2, dash="dot"),
-        hovertemplate="신규방식<br>%{x|%Y-%m}<br>%{y:,.0f} GJ<extra></extra>",
+        hovertemplate=f"신규방식<br>%{{x|%Y-%m}}<br>%{{y:,.1f}} {_ul}<extra></extra>",
     ))
     fig_cmp_mo.update_layout(
-        height=400, xaxis_title="연월", yaxis_title="공급량 (GJ)",
+        height=400, xaxis_title="연월", yaxis_title=f"공급량 ({_ul})",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         plot_bgcolor="white", paper_bgcolor="white",
         margin=dict(l=70,r=20,t=50,b=40), dragmode="pan",
@@ -641,7 +684,7 @@ with tab1:
     st.markdown("---")
 
     # 특정 연도 월별 비교
-    st.markdown(f'<div class="sub">📊 특정 연도 월별 비교 — {selected_product} (GJ)</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub">📊 특정 연도 월별 비교 — {selected_product} ({_ul})</div>', unsafe_allow_html=True)
     avail_years = sorted(set(old_prod.index.year) & set(new_prod.index.year))
     if not avail_years:
         st.info("공통 연도 데이터가 없습니다.")
@@ -649,27 +692,30 @@ with tab1:
         sel_year = st.selectbox("연도 선택", options=avail_years,
             index=len(avail_years)-1, key="sel_year_monthly")
 
-        old_yr_total_v = old_yr_p.get(sel_year, 0)
-        new_yr_total_v = new_yr_p.get(sel_year, 0)
-        yr_diff = new_yr_total_v - old_yr_total_v
-        yr_pct  = yr_diff / old_yr_total_v * 100 if old_yr_total_v else 0
-        sign_yr = "+" if yr_pct >= 0 else ""
-        pct_col = "#e8501a" if yr_pct >= 0 else "#2c5f8a"
+        old_yr_total_v    = old_yr_p.get(sel_year, 0)
+        new_yr_total_v    = new_yr_p.get(sel_year, 0)
+        old_yr_total_disp = gj_to_unit(old_yr_total_v)
+        new_yr_total_disp = gj_to_unit(new_yr_total_v)
+        yr_diff    = new_yr_total_v - old_yr_total_v
+        yr_diff_d  = gj_to_unit(yr_diff)
+        yr_pct     = yr_diff / old_yr_total_v * 100 if old_yr_total_v else 0
+        sign_yr    = "+" if yr_pct >= 0 else ""
+        pct_col    = "#e8501a" if yr_pct >= 0 else "#2c5f8a"
 
         st.markdown(f"""
         <div style="display:flex; gap:1rem; margin-bottom:1rem;">
             <div style="flex:1; background:#f4f8fc; border-left:4px solid #2c5f8a; padding:0.8rem 1.2rem; border-radius:4px;">
                 <div style="font-size:0.8rem; color:#666;">이전방식 ({sel_year}년 합계)</div>
-                <div style="font-size:1.3rem; font-weight:700; color:#2c5f8a;">{old_yr_total_v:,.0f} GJ</div>
+                <div style="font-size:1.3rem; font-weight:700; color:#2c5f8a;">{old_yr_total_disp:,.1f} {_ul}</div>
             </div>
             <div style="flex:1; background:#fff4f0; border-left:4px solid #e8501a; padding:0.8rem 1.2rem; border-radius:4px;">
                 <div style="font-size:0.8rem; color:#666;">신규방식 ({sel_year}년 합계)</div>
-                <div style="font-size:1.3rem; font-weight:700; color:#e8501a;">{new_yr_total_v:,.0f} GJ</div>
+                <div style="font-size:1.3rem; font-weight:700; color:#e8501a;">{new_yr_total_disp:,.1f} {_ul}</div>
             </div>
             <div style="flex:1; background:#f9f9f9; border-left:4px solid {pct_col}; padding:0.8rem 1.2rem; border-radius:4px;">
                 <div style="font-size:0.8rem; color:#666;">{sel_year}년 전체 차이</div>
                 <div style="font-size:1.5rem; font-weight:800; color:{pct_col};">{sign_yr}{yr_pct:.2f}%</div>
-                <div style="font-size:0.8rem; color:#888;">{sign_yr}{yr_diff:,.0f} GJ</div>
+                <div style="font-size:0.8rem; color:#888;">{sign_yr}{yr_diff_d:,.1f} {_ul}</div>
             </div>
         </div>
         """, unsafe_allow_html=True)
@@ -680,19 +726,21 @@ with tab1:
         new_mo = new_prod[new_prod.index.year == sel_year].copy()
         old_mo.index = old_mo.index.month
         new_mo.index = new_mo.index.month
-        old_mo_vals = [old_mo.get(m, 0) for m in range(1, 13)]
-        new_mo_vals = [new_mo.get(m, 0) for m in range(1, 13)]
-        mo_pct = [(n-o)/o*100 if o else 0.0 for o,n in zip(old_mo_vals, new_mo_vals)]
+        old_mo_gj   = [old_mo.get(m, 0) for m in range(1, 13)]
+        new_mo_gj   = [new_mo.get(m, 0) for m in range(1, 13)]
+        old_mo_vals = [gj_to_unit(v) for v in old_mo_gj]
+        new_mo_vals = [gj_to_unit(v) for v in new_mo_gj]
+        mo_pct = [(n-o)/o*100 if o else 0.0 for o,n in zip(old_mo_gj, new_mo_gj)]
         max_mo = max(max(old_mo_vals, default=1), max(new_mo_vals, default=1))
 
         fig_mo_yr = go.Figure()
         fig_mo_yr.add_trace(go.Bar(
             x=MONTH_KR, y=old_mo_vals, name="이전방식", marker_color="#2c5f8a",
-            hovertemplate="이전방식<br>%{x}<br>%{y:,.0f} GJ<extra></extra>",
+            hovertemplate=f"이전방식<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>",
         ))
         fig_mo_yr.add_trace(go.Bar(
             x=MONTH_KR, y=new_mo_vals, name="신규방식", marker_color="#e8501a",
-            hovertemplate="신규방식<br>%{x}<br>%{y:,.0f} GJ<extra></extra>",
+            hovertemplate=f"신규방식<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>",
         ))
         mo_ann = []
         for m, pct, nv in zip(MONTH_KR, mo_pct, new_mo_vals):
@@ -707,7 +755,7 @@ with tab1:
         fig_mo_yr.update_layout(
             barmode="group", height=420,
             title=dict(text=f"{sel_year}년 월별 비교 — {selected_product}", font=dict(size=15)),
-            xaxis_title="월", yaxis_title="공급량 (GJ)",
+            xaxis_title="월", yaxis_title=f"공급량 ({_ul})",
             yaxis=dict(range=[0, max_mo*1.18], showgrid=True, gridcolor="#ebebeb"),
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
             plot_bgcolor="white", paper_bgcolor="white",
@@ -715,23 +763,29 @@ with tab1:
         )
         st.plotly_chart(fig_mo_yr, use_container_width=True)
 
+        col_name = f"이전방식_{_ul}"
+        col_name2 = f"신규방식_{_ul}"
+        diff_vals = [n-o for o,n in zip(old_mo_vals, new_mo_vals)]
         tbl_mo_yr = pd.DataFrame({
-            "이전방식_GJ": old_mo_vals, "신규방식_GJ": new_mo_vals,
-            "차이_GJ": [n-o for o,n in zip(old_mo_vals, new_mo_vals)],
-            "차이(%)": mo_pct,
+            col_name:  old_mo_vals,
+            col_name2: new_mo_vals,
+            f"차이_{_ul}": diff_vals,
+            "차이(%)":  mo_pct,
         }, index=MONTH_KR)
         tbl_mo_yr.index.name = "월"
         subtotal_mo = pd.DataFrame([{
-            "이전방식_GJ": sum(old_mo_vals), "신규방식_GJ": sum(new_mo_vals),
-            "차이_GJ": sum(new_mo_vals)-sum(old_mo_vals),
-            "차이(%)": (sum(new_mo_vals)-sum(old_mo_vals))/sum(old_mo_vals)*100 if sum(old_mo_vals) else 0.0,
+            col_name:  sum(old_mo_vals),
+            col_name2: sum(new_mo_vals),
+            f"차이_{_ul}": sum(diff_vals),
+            "차이(%)": (sum(new_mo_gj)-sum(old_mo_gj))/sum(old_mo_gj)*100 if sum(old_mo_gj) else 0.0,
         }], index=[SUBTOTAL_LABEL])
         subtotal_mo.index.name = "월"
         tbl_mo_full = pd.concat([tbl_mo_yr, subtotal_mo])
+        fmt_dict = {col_name:"{:,.1f}", col_name2:"{:,.1f}",
+                    f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}
         st.dataframe(
             tbl_mo_full.style
-                .format({"이전방식_GJ":"{:,.1f}","신규방식_GJ":"{:,.1f}",
-                         "차이_GJ":"{:,.1f}","차이(%)":"{:+.2f}%"})
+                .format(fmt_dict)
                 .apply(style_subtotal_any, axis=None)
                 .map(color_pct, subset=["차이(%)"]),
             use_container_width=True,
@@ -739,18 +793,21 @@ with tab1:
 
     # 연도별 비교 테이블 (소계 없음)
     st.markdown(f'<div class="sub">📋 연도별 비교 테이블 — {selected_product}</div>', unsafe_allow_html=True)
+    col_o = f"이전방식_{_ul}"
+    col_n = f"신규방식_{_ul}"
     tbl_cmp = pd.DataFrame({
-        "이전방식_GJ": old_yr_p, "신규방식_GJ": new_yr_p,
+        col_o: old_yr_p.apply(gj_to_unit),
+        col_n: new_yr_p.apply(gj_to_unit),
     }).fillna(0).round(1)
-    tbl_cmp["차이_GJ"] = (tbl_cmp["신규방식_GJ"] - tbl_cmp["이전방식_GJ"]).round(1)
+    tbl_cmp[f"차이_{_ul}"] = (tbl_cmp[col_n] - tbl_cmp[col_o]).round(1)
     tbl_cmp["차이(%)"] = (
-        tbl_cmp["차이_GJ"] / tbl_cmp["이전방식_GJ"].replace(0, float("nan")) * 100
+        (new_yr_p - old_yr_p).fillna(0) / old_yr_p.replace(0, float("nan")) * 100
     ).round(2)
     tbl_cmp.index.name = "연도"
     st.dataframe(
         tbl_cmp.style
-            .format({"이전방식_GJ":"{:,.1f}","신규방식_GJ":"{:,.1f}",
-                     "차이_GJ":"{:,.1f}","차이(%)":"{:+.2f}%"})
+            .format({col_o:"{:,.1f}", col_n:"{:,.1f}",
+                     f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"})
             .map(color_pct, subset=["차이(%)"]),
         use_container_width=True,
     )
