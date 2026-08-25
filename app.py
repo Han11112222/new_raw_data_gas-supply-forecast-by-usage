@@ -162,9 +162,10 @@ def build_new_result(supply_df, ratio_df, y_start, y_end):
 def build_pivot_flat(df_long: pd.DataFrame, value_col: str = "공급량_GJ"):
     """
     반환:
-      display_df  : 표시용 DataFrame (정산그룹, 정산항목, 날짜열...)
-      row_types   : list[str] — 'data'/'subtotal'/'total'
-      group_labels: list[str] — 정산그룹 열에 넣을 텍스트 (병합 표현)
+      display_df : 표시용 DataFrame
+                   인덱스=정수(0~), 열=[정산그룹, 정산항목, YYYY-MM, ...]
+      row_types  : list[str] — 'data'/'subtotal'/'total'
+    정산그룹은 일반 열로 유지 (MultiIndex 사용 안 함 → 스타일러 호환)
     """
     pivot = (
         df_long.pivot_table(index="상품", columns="연월", values=value_col, aggfunc="sum")
@@ -174,35 +175,31 @@ def build_pivot_flat(df_long: pd.DataFrame, value_col: str = "공급량_GJ"):
     date_cols = [c.strftime("%Y-%m") for c in pivot.columns]
     pivot.columns = date_cols
 
-    rows_data   = []   # (group_label, item_label, row_type, Series)
+    rows_data = []   # (group_label, item_label, row_type, Series)
 
     for group, products in [("주택용", HOUSING_PRODUCTS), ("기타", OTHER_PRODUCTS)]:
         for i, p in enumerate(products):
-            row = pivot.loc[p] if p in pivot.index else pd.Series(0, index=date_cols)
-            # 정산그룹: 첫 행만 표시, 나머지 빈칸
+            row = pivot.loc[p].copy() if p in pivot.index else pd.Series(0.0, index=date_cols)
             g_label = group if i == 0 else ""
             rows_data.append((g_label, p, "data", row))
 
-        # 소계
         sub_ps  = [p for p in products if p in pivot.index]
-        sub_row = pivot.loc[sub_ps].sum() if sub_ps else pd.Series(0, index=date_cols)
+        sub_row = pivot.loc[sub_ps].sum() if sub_ps else pd.Series(0.0, index=date_cols)
         rows_data.append(("", SUBTOTAL_LABEL, "subtotal", sub_row))
 
-    # 합계
     total_row = pivot.sum()
     rows_data.append(("", TOTAL_LABEL, "total", total_row))
 
-    group_labels = [r[0] for r in rows_data]
-    item_labels  = [r[1] for r in rows_data]
-    row_types    = [r[2] for r in rows_data]
-    data_matrix  = pd.DataFrame([r[3].values for r in rows_data],
-                                 columns=date_cols)
+    row_types = [r[2] for r in rows_data]
 
-    display_df = pd.concat([
-        pd.DataFrame({"정산그룹": group_labels, "정산항목": item_labels}),
-        data_matrix,
-    ], axis=1).set_index(["정산그룹", "정산항목"])
+    # 단일 정수 인덱스 DataFrame으로 조립
+    records = []
+    for g_label, item, rtype, series in rows_data:
+        rec = {"정산그룹": g_label, "정산항목": item}
+        rec.update(series.to_dict())
+        records.append(rec)
 
+    display_df = pd.DataFrame(records)   # 인덱스: 0,1,2,...
     return display_df, row_types
 
 # ──────────────────────────────────────────────
@@ -212,22 +209,33 @@ def style_pivot_flat(df: pd.DataFrame, row_types: list,
                      gradient: bool = False,
                      diff_mode: bool = False) -> "pd.io.formats.style.Styler":
     """
-    diff_mode=False : 파랑 계열 단방향 그라데이션 (공급량)
+    df 인덱스는 정수(0,1,2,...).
+    앞 두 열(정산그룹, 정산항목)은 텍스트 열 → 그라데이션 스킵.
+    diff_mode=False : 파랑 계열 그라데이션 (공급량)
     diff_mode=True  : 양수=오렌지, 음수=파랑 (차이/차이율)
-    소계/합계 행은 항상 강조 배경
     """
     n_rows, n_cols = df.shape
+
+    # 숫자 열 시작 인덱스 (정산그룹, 정산항목 = 앞 2열 스킵)
+    TEXT_COLS = 2
+
     bg  = [[""] * n_cols for _ in range(n_rows)]
     txt = [[""] * n_cols for _ in range(n_rows)]
 
-    # 그라데이션 기준값: data 행 숫자만
+    # 그라데이션 기준: data 행의 숫자 열만
+    abs_max = 1.0
     if gradient:
         data_mask = [t == "data" for t in row_types]
-        data_vals = df.values[data_mask].astype(float)
-        if diff_mode:
-            abs_max = np.nanmax(np.abs(data_vals)) if data_vals.size > 0 else 1
-        else:
-            abs_max = np.nanmax(data_vals) if data_vals.size > 0 else 1
+        try:
+            data_vals = df.iloc[data_mask, TEXT_COLS:].values.astype(float)
+            if diff_mode:
+                abs_max = float(np.nanmax(np.abs(data_vals))) if data_vals.size > 0 else 1.0
+            else:
+                abs_max = float(np.nanmax(data_vals)) if data_vals.size > 0 else 1.0
+        except Exception:
+            abs_max = 1.0
+    if abs_max == 0:
+        abs_max = 1.0
 
     for i, rtype in enumerate(row_types):
         if rtype == "subtotal":
@@ -238,14 +246,15 @@ def style_pivot_flat(df: pd.DataFrame, row_types: list,
             for j in range(n_cols):
                 bg[i][j]  = "background-color:#c5d8f0;"
                 txt[i][j] = "font-weight:bold; color:#1a3c5e;"
-        elif gradient and abs_max > 0:
-            for j in range(n_cols):
+        elif gradient:
+            for j in range(TEXT_COLS, n_cols):   # 숫자 열만
                 try:
                     val = float(df.iloc[i, j])
+                    if np.isnan(val):
+                        continue
                 except Exception:
                     continue
-                if np.isnan(val):
-                    continue
+
                 if diff_mode:
                     intensity = min(abs(val) / abs_max, 1.0)
                     alpha = 0.07 + intensity * 0.58
@@ -258,7 +267,7 @@ def style_pivot_flat(df: pd.DataFrame, row_types: list,
                         if intensity > 0.55:
                             txt[i][j] = "color:#0a1f30;"
                 else:
-                    intensity = min(val / abs_max, 1.0)
+                    intensity = min(val / abs_max, 1.0) if val > 0 else 0.0
                     alpha = 0.05 + intensity * 0.55
                     r = int(44  + (1 - intensity) * 170)
                     g = int(95  + (1 - intensity) * 120)
@@ -395,12 +404,22 @@ with tab0:
     # ── 차이(GJ) 피벗
     st.markdown('<div class="sub">📋 차이 (신규 − 이전, GJ) — 클수록 진한 색상</div>', unsafe_allow_html=True)
 
-    common_cols = sorted(set(old_pivot.columns) & set(new_pivot.columns))
-    diff_pivot  = new_pivot[common_cols].subtract(old_pivot[common_cols]).fillna(0)
+    # 숫자 열(날짜 열)만 추출해서 차이 계산
+    date_cols_old = [c for c in old_pivot.columns if c not in ("정산그룹", "정산항목")]
+    date_cols_new = [c for c in new_pivot.columns if c not in ("정산그룹", "정산항목")]
+    common_date_cols = sorted(set(date_cols_old) & set(date_cols_new))
+
+    diff_num = (
+        new_pivot[common_date_cols].values.astype(float) -
+        old_pivot[common_date_cols].values.astype(float)
+    )
+    diff_pivot = old_pivot[["정산그룹", "정산항목"]].copy()
+    for j, col in enumerate(common_date_cols):
+        diff_pivot[col] = diff_num[:, j]
 
     st.dataframe(
         style_pivot_flat(diff_pivot, new_rtypes, gradient=True, diff_mode=True)
-        .format("{:+,.0f}"),
+        .format(subset=common_date_cols, formatter="{:+,.0f}"),
         use_container_width=True, height=590,
     )
 
@@ -409,22 +428,27 @@ with tab0:
     # ── 차이율(%) 피벗
     st.markdown('<div class="sub">📋 차이율 (%, 신규/이전 기준) — 클수록 진한 색상</div>', unsafe_allow_html=True)
 
-    old_base = old_pivot[common_cols].replace(0, np.nan)
-    pct_pivot = (diff_pivot / old_base * 100).round(2)
+    old_num = old_pivot[common_date_cols].values.astype(float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        pct_num = np.where(old_num != 0, diff_num / old_num * 100, np.nan)
+
+    pct_pivot = old_pivot[["정산그룹", "정산항목"]].copy()
+    for j, col in enumerate(common_date_cols):
+        pct_pivot[col] = pct_num[:, j]
 
     st.dataframe(
         style_pivot_flat(pct_pivot, new_rtypes, gradient=True, diff_mode=True)
-        .format("{:+.2f}%", na_rep="-"),
+        .format(subset=common_date_cols, formatter="{:+.2f}%", na_rep="-"),
         use_container_width=True, height=590,
     )
 
     # 다운로드
     buf_matrix = BytesIO()
     with pd.ExcelWriter(buf_matrix, engine="openpyxl") as w:
-        old_pivot.to_excel(w, sheet_name="이전방식")
-        new_pivot.to_excel(w, sheet_name="신규방식")
-        diff_pivot.to_excel(w, sheet_name="차이_GJ")
-        pct_pivot.to_excel(w, sheet_name="차이율_%")
+        old_pivot.to_excel(w, sheet_name="이전방식", index=False)
+        new_pivot.to_excel(w, sheet_name="신규방식", index=False)
+        diff_pivot.to_excel(w, sheet_name="차이_GJ", index=False)
+        pct_pivot.to_excel(w, sheet_name="차이율_%", index=False)
     st.download_button(
         "⬇️ 전체 매트릭스 엑셀 다운로드", data=buf_matrix.getvalue(),
         file_name=f"전체매트릭스_{y_start}_{y_end}.xlsx",
