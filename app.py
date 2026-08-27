@@ -990,65 +990,159 @@ with tab3:
 
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # ── 전체 상품 연간 비교 테이블
+    # ── 전체 상품 연간 비교 테이블 (정산그룹 병합 구조 — HTML rowspan)
     st.markdown('<div class="sub">📋 전체 상품 연간 비교 — 2025년 합계</div>', unsafe_allow_html=True)
-    all_rows = []
+
+    # 상품별 데이터 수집
+    product_data = {}
     for p in PRODUCT_LIST:
         if use_old_mode:
             p_src = old_result[old_result["상품"] == p]
         else:
             p_src = new_result[new_result["상품"] == p]
         p_2025 = p_src[p_src["연월"].dt.year == 2025]["공급량_GJ"].sum()
-        k_2025 = float(KOGAS_GJ.loc[p, _KOGAS_MONTHS].sum()) if p in KOGAS_GJ.index else 0.0  # 판매량(MJ) 기준
-        diff_v  = p_2025 - k_2025
-        pct_v   = diff_v / k_2025 * 100 if k_2025 else 0.0
-        all_rows.append({
-            "상품":            p,
-            "그룹":            GROUP_MAP.get(p, "기타"),
-            col_r:             gj_to_unit(p_2025),
-            col_kg:            gj_to_unit(k_2025),
-            f"차이_{_ul}":    gj_to_unit(diff_v),
-            "차이(%)":         pct_v,
-        })
-    tbl_all = pd.DataFrame(all_rows).set_index("상품")
-    # 소계 행 추가
-    for grp, prods in [("주택용 소계", HOUSING_PRODUCTS), ("기타 소계", OTHER_PRODUCTS)]:
-        sub_r = tbl_all.loc[[p for p in prods if p in tbl_all.index], col_r].sum()
-        sub_k = tbl_all.loc[[p for p in prods if p in tbl_all.index], col_kg].sum()
-        sd    = sub_r - sub_k
-        sp    = sd / sub_k * 100 if sub_k else 0.0
-        tbl_all.loc[grp] = {"그룹": grp, col_r: sub_r, col_kg: sub_k, f"차이_{_ul}": sd, "차이(%)": sp}
+        k_2025 = float(KOGAS_GJ.loc[p, _KOGAS_MONTHS].sum()) if p in KOGAS_GJ.index else 0.0
+        diff_v = p_2025 - k_2025
+        pct_v  = diff_v / k_2025 * 100 if k_2025 else 0.0
+        product_data[p] = {
+            "r_gj": p_2025, "k_gj": k_2025,
+            "diff_gj": diff_v, "pct": pct_v,
+        }
+
+    # 소계 계산
+    def calc_sub(prods):
+        sr = sum(product_data[p]["r_gj"] for p in prods if p in product_data)
+        sk = sum(product_data[p]["k_gj"] for p in prods if p in product_data)
+        sd = sr - sk
+        sp = sd / sk * 100 if sk else 0.0
+        return sr, sk, sd, sp
+
+    h_r, h_k, h_d, h_p = calc_sub(HOUSING_PRODUCTS)
+    o_r, o_k, o_d, o_p = calc_sub(OTHER_PRODUCTS)
+    tot_r = h_r + o_r
+    tot_k = h_k + o_k
+    tot_d = tot_r - tot_k
+    tot_p = tot_d / tot_k * 100 if tot_k else 0.0
+
+    # ── HTML 테이블 생성 (rowspan 병합)
+    def _pct_color(v):
+        return "#c0390b" if v >= 0 else "#1a4f8a"
+
+    def _fmt_num(v):
+        return f"{gj_to_unit(v):,.1f}"
+
+    def _fmt_pct(v):
+        sign = "+" if v >= 0 else ""
+        return f'<span style="color:{_pct_color(v)}; font-weight:600;">{sign}{v:.2f}%</span>'
+
+    tbl_css = """
+    <style>
+    .ann-tbl { border-collapse:collapse; font-size:0.8rem;
+               font-family:'Segoe UI','Noto Sans KR',sans-serif;
+               width:100%; white-space:nowrap; }
+    .ann-tbl thead th {
+        background:#2c5f8a; color:#fff; padding:6px 12px;
+        text-align:center; border:1px solid #1a3c5e; font-weight:600; }
+    .ann-tbl th.th-grp  { min-width:70px; }
+    .ann-tbl th.th-item { min-width:100px; text-align:left; padding-left:12px; }
+    .ann-tbl th.th-num  { min-width:130px; }
+    .ann-tbl td { padding:5px 12px; border:1px solid #dde3ea; text-align:right; }
+    .ann-tbl td.td-grp  {
+        text-align:center; font-weight:700; color:#1a3c5e;
+        background:#eaf1f8 !important; border-right:2px solid #2c5f8a;
+        vertical-align:middle; }
+    .ann-tbl td.td-item { text-align:left; padding-left:16px; background:#fff; }
+    .ann-tbl tr.tr-data:hover td { background:#f0f6ff !important; }
+    .ann-tbl tr.tr-sub  td { background:#ddeaf8 !important; font-weight:700; color:#1a3c5e; }
+    .ann-tbl tr.tr-sub  td.td-item { text-align:center; padding-left:0; }
+    .ann-tbl tr.tr-total td { background:#c5d8f0 !important; font-weight:700; color:#1a3c5e; }
+    .ann-tbl tr.tr-total td.td-item { text-align:center; padding-left:0; }
+    </style>
+    """
+
+    col_h1 = badge_label + f" ({_ul})"
+    col_h2 = f"KOGAS 제출 ({_ul})"
+    col_h3 = f"차이 ({_ul})"
+    col_h4 = "차이 (%)"
+
+    hdr = f"""<tr>
+      <th class="th-grp">정산그룹</th>
+      <th class="th-item">정산항목</th>
+      <th class="th-num">{col_h1}</th>
+      <th class="th-num">{col_h2}</th>
+      <th class="th-num">{col_h3}</th>
+      <th class="th-num">{col_h4}</th>
+    </tr>"""
+
+    def product_rows(prods, grp_name, sub_r, sub_k, sub_d, sub_p):
+        rows = ""
+        n = len(prods)
+        rowspan = n + 1  # 상품 수 + 소계 1행
+        for i, p in enumerate(prods):
+            d = product_data.get(p, {"r_gj":0,"k_gj":0,"diff_gj":0,"pct":0})
+            grp_cell = f'<td class="td-grp" rowspan="{rowspan}">{grp_name}</td>' if i == 0 else ""
+            rows += f"""<tr class="tr-data">
+              {grp_cell}
+              <td class="td-item">{p}</td>
+              <td>{_fmt_num(d["r_gj"])}</td>
+              <td>{_fmt_num(d["k_gj"])}</td>
+              <td>{_fmt_num(d["diff_gj"])}</td>
+              <td>{_fmt_pct(d["pct"])}</td>
+            </tr>"""
+        # 소계 행
+        rows += f"""<tr class="tr-sub">
+          <td class="td-item">소 계</td>
+          <td>{_fmt_num(sub_r)}</td>
+          <td>{_fmt_num(sub_k)}</td>
+          <td>{_fmt_num(sub_d)}</td>
+          <td>{_fmt_pct(sub_p)}</td>
+        </tr>"""
+        return rows
+
+    body  = product_rows(HOUSING_PRODUCTS, "주택용", h_r, h_k, h_d, h_p)
+    body += product_rows(OTHER_PRODUCTS,   "기타",   o_r, o_k, o_d, o_p)
     # 합계 행
-    tot_r = tbl_all[tbl_all["그룹"].isin(["주택용","기타"])][col_r].sum()
-    tot_k = tbl_all[tbl_all["그룹"].isin(["주택용","기타"])][col_kg].sum()
-    td    = tot_r - tot_k
-    tp    = td / tot_k * 100 if tot_k else 0.0
-    tbl_all.loc["합 계"] = {"그룹": "전체", col_r: tot_r, col_kg: tot_k, f"차이_{_ul}": td, "차이(%)": tp}
+    body += f"""<tr class="tr-total">
+      <td class="td-grp"></td>
+      <td class="td-item">합 계</td>
+      <td>{_fmt_num(tot_r)}</td>
+      <td>{_fmt_num(tot_k)}</td>
+      <td>{_fmt_num(tot_d)}</td>
+      <td>{_fmt_pct(tot_p)}</td>
+    </tr>"""
 
-    sub_rows_idx = [i for i in tbl_all.index if "소계" in i or i == "합 계"]
+    ann_html = f"""{tbl_css}
+    <div style="overflow-x:auto; border:1px solid #c8d8e8; border-radius:6px; margin-bottom:1rem;">
+      <table class="ann-tbl">
+        <thead>{hdr}</thead>
+        <tbody>{body}</tbody>
+      </table>
+    </div>"""
 
-    def style_all_tbl(df):
-        styles = pd.DataFrame("", index=df.index, columns=df.columns)
-        for idx in sub_rows_idx:
-            if idx in df.index:
-                bg = "#ddeaf8" if "소계" in idx else "#c5d8f0"
-                styles.loc[idx] = f"background-color:{bg}; font-weight:bold; color:#1a3c5e;"
-        return styles
+    st.html(ann_html)
 
-    disp_cols = [col_r, col_kg, f"차이_{_ul}", "차이(%)"]
-    st.dataframe(
-        tbl_all[disp_cols].style
-            .format({col_r:"{:,.1f}", col_kg:"{:,.1f}", f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"})
-            .apply(style_all_tbl, axis=None)
-            .map(color_pct, subset=["차이(%)"]),
-        use_container_width=True, height=560,
-    )
+    # 엑셀용 DataFrame 별도 생성
+    excel_rows = []
+    for grp_name, prods in [("주택용", HOUSING_PRODUCTS), ("기타", OTHER_PRODUCTS)]:
+        for p in prods:
+            d = product_data.get(p, {"r_gj":0,"k_gj":0,"diff_gj":0,"pct":0})
+            excel_rows.append({"정산그룹": grp_name, "정산항목": p,
+                col_r: gj_to_unit(d["r_gj"]), col_kg: gj_to_unit(d["k_gj"]),
+                f"차이_{_ul}": gj_to_unit(d["diff_gj"]), "차이(%)": d["pct"]})
+        sr, sk, sd, sp = calc_sub(prods)
+        excel_rows.append({"정산그룹": "", "정산항목": "소 계",
+            col_r: gj_to_unit(sr), col_kg: gj_to_unit(sk),
+            f"차이_{_ul}": gj_to_unit(sd), "차이(%)": sp})
+    excel_rows.append({"정산그룹": "", "정산항목": "합 계",
+        col_r: gj_to_unit(tot_r), col_kg: gj_to_unit(tot_k),
+        f"차이_{_ul}": gj_to_unit(tot_d), "차이(%)": tot_p})
+    tbl_all_excel = pd.DataFrame(excel_rows)
 
     # 엑셀 다운로드
     buf_k = BytesIO()
     with pd.ExcelWriter(buf_k, engine="openpyxl") as w:
         tbl_k_full.to_excel(w, sheet_name=f"{k_selected}_월별비교")
-        tbl_all[disp_cols].to_excel(w, sheet_name="전체상품_연간비교")
+        tbl_all_excel.to_excel(w, sheet_name="전체상품_연간비교", index=False)
     st.download_button(
         f"⬇️ KOGAS 비교 엑셀 다운로드", data=buf_k.getvalue(),
         file_name=f"KOGAS비교_{k_selected}_2025.xlsx",
