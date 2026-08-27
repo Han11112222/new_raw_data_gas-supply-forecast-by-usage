@@ -19,6 +19,8 @@ h1 { color: #1a3c5e; border-bottom: 3px solid #e8501a; padding-bottom: 0.3rem; }
              padding:2px 10px; border-radius:12px; font-size:0.82rem; margin-right:6px; }
 .badge-new { display:inline-block; background:#e8501a; color:#fff;
              padding:2px 10px; border-radius:12px; font-size:0.82rem; margin-right:6px; }
+.badge-kogas { display:inline-block; background:#2a7a4b; color:#fff;
+             padding:2px 10px; border-radius:12px; font-size:0.82rem; margin-right:6px; }
 .info-box {
     background:#f4f8fc; border-radius:8px; padding:0.9rem 1.4rem;
     margin-bottom:1rem; border-left:4px solid #2c5f8a;
@@ -43,10 +45,9 @@ PRODUCT_LIST     = HOUSING_PRODUCTS + OTHER_PRODUCTS
 GROUP_MAP = {p: "주택용" for p in HOUSING_PRODUCTS}
 GROUP_MAP.update({p: "기타" for p in OTHER_PRODUCTS})
 
-# 정산그룹 rowspan 구조
 GROUP_SPANS = [
-    ("주택용", len(HOUSING_PRODUCTS) + 1),   # data 4 + subtotal 1 = 5
-    ("기타",   len(OTHER_PRODUCTS)   + 1),   # data 9 + subtotal 1 = 10
+    ("주택용", len(HOUSING_PRODUCTS) + 1),
+    ("기타",   len(OTHER_PRODUCTS)   + 1),
 ]
 
 TOTAL_ROW_IDX   = 1
@@ -57,6 +58,61 @@ SUPPLY_DATA_ROWS = [24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37]
 SUBTOTAL_LABEL = "소 계"
 TOTAL_LABEL    = "합 계"
 SUBTOTAL_STYLE = "background-color:#ddeaf8; font-weight:bold; color:#1a3c5e;"
+
+# ──────────────────────────────────────────────
+# KOGAS 제출 물량 (판매량계 MJ → GJ)
+# 출처: 한국가스공사 제출용 구성비 2025.01~12
+# ──────────────────────────────────────────────
+_KOGAS_RAW_MJ = {
+    "취사용":       [22528424,      22577641.8714,  20619854.7301,  20555869.5196,
+                    19464912.8195,  19208315.8503,  18486609.9488,  18781399.7069,
+                    18023947.6279,  19973230.6939,  20033611.0042,  21151638.5849],
+    "개별난방용":   [4605641652,    4661302339.4723, 3160609816.0333, 1642867844.6371,
+                    1057371508.7759, 634292658.3708, 483145021.0925, 425021509.6008,
+                    480674701.0690, 1029298145.8647, 2461104910.2985, 4453646847.3386],
+    "중앙난방용":   [108064211,     98122572.1497,  81515348.4942,  44989505.3968,
+                    24135510.9806,  16827651.0218,  11960106.1481,  9572967.6972,
+                    12346635.2679,  28037892.3927,  57492331.3318,  88198469.7410],
+    "자가열전용":   [73321702,      68217256.5968,  41847586.5865,  18126708.0430,
+                    9789260.3598,   7013854.5389,   3642302.4638,   3536621.0753,
+                    4359081.8933,   11459312.1309,  31970956.4170,  60710880.2353],
+    "일반용":       [388589794,     345900648.5347, 358372384.8419, 303140117.2853,
+                    287020194.2914, 243936162.9109, 232505809.1887, 217998667.2614,
+                    226832802.6076, 272499801.0479, 310430289.5324, 372479276.6909],
+    "냉난방공조용": [166215359,     168435991.3218, 84821710.2888,  32178274.5774,
+                    51716123.1367,  138691974.7244, 212042349.0680, 223249016.6679,
+                    167906098.2405, 54191823.1906,  62066020.4836,  141535750.1233],
+    "업무난방용":   [133161438,     137943330.8268, 87220203.9677,  44455089.2395,
+                    20300360.2997,  21366245.3322,  17996786.4652,  17198446.9251,
+                    18977535.4561,  18899535.3144,  69087649.5126,  120826118.7412],
+    "산업용":       [876935403,     883940217.5498, 824439602.0200, 793061906.6426,
+                    728629307.8986, 690310823.8775, 706786817.5483, 659943859.4157,
+                    725048473.1511, 685046725.1428, 817465931.5638, 847848530.7028],
+    "수송용":       [245230758,     236341015.6950, 251630783.5494, 251298300.9538,
+                    262403158.8939, 259332171.3476, 282160534.9959, 277821651.0915,
+                    266680584.4900, 249985920.3632, 250148113.8952, 264560653.6417],
+    "열병합용":     [26076203,      24730645.0480,  25513126.0772,  22323074.6776,
+                    17784555.5029,  11095147.4725,  18255563.6867,  18694118.5716,
+                    13676270.1798,  13817935.6272,  19036035.7712,  27334493.2898],
+    "연료전지용":   [19407276,      14839232.3865,  17590385.0715,  16706989.8312,
+                    16844042.7317,  17064584.9057,  16593745.1583,  16777239.1856,
+                    18032621.6369,  18415368.2804,  16902463.0004,  19498114.0156],
+    "열전용설비용": [17700305,      7559736.8580,   23428900.4190,  2705145.6960,
+                    464678.8650,    815421.0240,    1060136.9850,   571528.0480,
+                    540267.2600,    8111133.5500,   18025286.3000,  13499196.4800],
+    "주한미군":     [12186297,      10672541.8819,  6854857.0958,   2520799.6358,
+                    2226799.2964,   1870822.2538,   1625846.1678,   1585241.3217,
+                    1923349.8831,   2258927.1759,   5376100.8906,   9690043.6337],
+}
+
+_KOGAS_MONTHS = [f"2025-{m:02d}" for m in range(1, 13)]
+
+# MJ → GJ 변환 후 DataFrame (index=상품, columns=YYYY-MM)
+KOGAS_GJ = pd.DataFrame(
+    {p: [v / 1000.0 for v in vals] for p, vals in _KOGAS_RAW_MJ.items()},
+    index=_KOGAS_MONTHS
+).T
+KOGAS_GJ.index.name = "상품"
 
 # ──────────────────────────────────────────────
 # 데이터 로드
@@ -153,7 +209,7 @@ def build_new_result(supply_df, ratio_df, y_start, y_end):
     return df
 
 # ──────────────────────────────────────────────
-# 피벗 빌더 (단일 정수 인덱스)
+# 피벗 빌더
 # ──────────────────────────────────────────────
 def build_pivot_flat(df_long: pd.DataFrame, value_col: str = "공급량_GJ"):
     pivot = (
@@ -188,63 +244,36 @@ def build_pivot_flat(df_long: pd.DataFrame, value_col: str = "공급량_GJ"):
     return display_df, row_types
 
 # ──────────────────────────────────────────────
-# HTML 테이블 렌더러 (실제 rowspan 병합)
+# HTML 테이블 렌더러
 # ──────────────────────────────────────────────
 _TABLE_CSS = """
 <style>
 .pivot-wrap {
-    overflow-x: auto;
-    overflow-y: auto;
-    max-height: 620px;
-    margin-bottom: 1rem;
-    border-radius: 6px;
-    border: 1px solid #c8d8e8;
+    overflow-x: auto; overflow-y: auto; max-height: 620px;
+    margin-bottom: 1rem; border-radius: 6px; border: 1px solid #c8d8e8;
 }
 .pivot-tbl {
-    border-collapse: collapse;
-    font-size: 0.78rem;
+    border-collapse: collapse; font-size: 0.78rem;
     font-family: 'Segoe UI', 'Noto Sans KR', sans-serif;
-    white-space: nowrap;
-    min-width: 100%;
+    white-space: nowrap; min-width: 100%;
 }
 .pivot-tbl thead th {
-    background: #2c5f8a;
-    color: #fff;
-    padding: 6px 10px;
-    text-align: center;
-    position: sticky;
-    top: 0;
-    z-index: 3;
-    border: 1px solid #1a3c5e;
-    font-weight: 600;
+    background: #2c5f8a; color: #fff; padding: 6px 10px;
+    text-align: center; position: sticky; top: 0; z-index: 3;
+    border: 1px solid #1a3c5e; font-weight: 600;
 }
 .pivot-tbl th.th-grp  { min-width: 58px; }
 .pivot-tbl th.th-item { min-width: 96px; text-align: left; padding-left:10px; }
 .pivot-tbl th.th-date { min-width: 72px; }
-.pivot-tbl td {
-    padding: 4px 10px;
-    text-align: right;
-    border: 1px solid #dde3ea;
-}
+.pivot-tbl td { padding: 4px 10px; text-align: right; border: 1px solid #dde3ea; }
 .pivot-tbl td.td-group {
-    text-align: center;
-    font-weight: 700;
-    color: #1a3c5e;
-    background: #eaf1f8 !important;
-    border-right: 2px solid #2c5f8a;
-    vertical-align: middle;
-    position: sticky;
-    left: 0;
-    z-index: 1;
+    text-align: center; font-weight: 700; color: #1a3c5e;
+    background: #eaf1f8 !important; border-right: 2px solid #2c5f8a;
+    vertical-align: middle; position: sticky; left: 0; z-index: 1;
 }
 .pivot-tbl td.td-item {
-    text-align: left;
-    padding-left: 14px;
-    background: #fff;
-    position: sticky;
-    left: 62px;
-    z-index: 1;
-    border-right: 1px solid #c8d8e8;
+    text-align: left; padding-left: 14px; background: #fff;
+    position: sticky; left: 62px; z-index: 1; border-right: 1px solid #c8d8e8;
 }
 .pivot-tbl tr.row-data:hover td { background: #f0f6ff !important; }
 .pivot-tbl tr.row-sub  td { background: #ddeaf8 !important; font-weight:700; color:#1a3c5e; }
@@ -254,17 +283,13 @@ _TABLE_CSS = """
 </style>
 """
 
-def _gradient_bg(val: float, abs_max: float, diff_mode: bool) -> str:
-    """값에 따른 인라인 background-color 스타일 반환"""
-    if abs_max == 0 or np.isnan(val):
-        return ""
+def _gradient_bg(val, abs_max, diff_mode):
+    if abs_max == 0 or np.isnan(val): return ""
     intensity = min(abs(val) / abs_max, 1.0)
     alpha = 0.06 + intensity * 0.55
     if diff_mode:
-        if val > 0:
-            return f"background-color:rgba(232,80,26,{alpha:.2f});"
-        elif val < 0:
-            return f"background-color:rgba(44,95,138,{alpha:.2f});"
+        if val > 0: return f"background-color:rgba(232,80,26,{alpha:.2f});"
+        elif val < 0: return f"background-color:rgba(44,95,138,{alpha:.2f});"
         return ""
     else:
         r = int(44  + (1 - intensity) * 170)
@@ -272,27 +297,17 @@ def _gradient_bg(val: float, abs_max: float, diff_mode: bool) -> str:
         b = int(138 + (1 - intensity) * 90)
         return f"background-color:rgba({r},{g},{b},{alpha:.2f});"
 
-def _diff_text_color(val: float) -> str:
+def _diff_text_color(val):
     try:
         if val > 0: return "color:#9b2a00;"
         if val < 0: return "color:#0a2a44;"
     except: pass
     return ""
 
-def build_html_pivot(display_df: pd.DataFrame, row_types: list,
-                     fmt_func=None, diff_mode: bool = False,
-                     gradient: bool = True) -> str:
-    """
-    display_df : columns = [정산그룹, 정산항목, YYYY-MM, ...]
-    row_types  : list of 'data'/'subtotal'/'total'
-    fmt_func   : (float) -> str  포맷 함수
-    diff_mode  : True=양수오렌지/음수파랑, False=파랑단방향
-    gradient   : True=그라데이션 배경
-    """
+def build_html_pivot(display_df, row_types, fmt_func=None, diff_mode=False, gradient=True):
     date_cols = [c for c in display_df.columns if c not in ("정산그룹", "정산항목")]
     df = display_df.reset_index(drop=True)
 
-    # 그라데이션 기준: data 행 숫자값만
     abs_max = 1.0
     if gradient:
         data_mask = [i for i, t in enumerate(row_types) if t == "data"]
@@ -300,20 +315,16 @@ def build_html_pivot(display_df: pd.DataFrame, row_types: list,
             data_vals = df.loc[data_mask, date_cols].values.astype(float)
             abs_max = float(np.nanmax(np.abs(data_vals))) if diff_mode else float(np.nanmax(data_vals))
             if abs_max == 0: abs_max = 1.0
-        except Exception:
-            abs_max = 1.0
+        except: abs_max = 1.0
 
-    # rowspan 매핑
     group_cell = {}
     gi = 0
     for gname, gspan in GROUP_SPANS:
         group_cell[gi] = (gname, gspan)
-        for k in range(1, gspan):
-            group_cell[gi + k] = None
+        for k in range(1, gspan): group_cell[gi + k] = None
         gi += gspan
-    group_cell[gi] = ("", 1)   # 합계 행
+    group_cell[gi] = ("", 1)
 
-    # 헤더
     hdr = "<tr>"
     hdr += '<th class="th-grp">정산그룹</th>'
     hdr += '<th class="th-item">정산항목</th>'
@@ -321,41 +332,24 @@ def build_html_pivot(display_df: pd.DataFrame, row_types: list,
         hdr += f'<th class="th-date">{dc}</th>'
     hdr += "</tr>"
 
-    # 바디
     body = ""
     for i, rtype in enumerate(row_types):
         row_cls = {"data":"row-data","subtotal":"row-sub","total":"row-total"}.get(rtype,"row-data")
         body += f'<tr class="{row_cls}">'
-
-        # 정산그룹 (rowspan 병합)
         gc = group_cell.get(i)
         if gc is not None:
             gname, gspan = gc
             body += f'<td class="td-group" rowspan="{gspan}">{gname}</td>'
-        # gc == None → 병합됐으므로 생략
-
-        # 정산항목
         item = df.at[i, "정산항목"]
         body += f'<td class="td-item">{item}</td>'
-
-        # 날짜 열
         for dc in date_cols:
             raw_val = df.at[i, dc]
             try:
                 fval = float(raw_val)
                 is_nan = np.isnan(fval)
-            except Exception:
+            except:
                 fval, is_nan = 0.0, True
-
-            # 포맷
-            if is_nan:
-                disp = "-"
-            elif fmt_func:
-                disp = fmt_func(fval)
-            else:
-                disp = f"{fval:,.0f}"
-
-            # 스타일
+            disp = "-" if is_nan else (fmt_func(fval) if fmt_func else f"{fval:,.0f}")
             style_parts = []
             if not is_nan and gradient and rtype == "data":
                 bg = _gradient_bg(fval, abs_max, diff_mode)
@@ -363,14 +357,11 @@ def build_html_pivot(display_df: pd.DataFrame, row_types: list,
                 if diff_mode:
                     tc = _diff_text_color(fval)
                     if tc: style_parts.append(tc)
-
             style_attr = f' style="{" ".join(style_parts)}"' if style_parts else ""
             body += f"<td{style_attr}>{disp}</td>"
-
         body += "</tr>"
 
-    return f"""
-{_TABLE_CSS}
+    return f"""{_TABLE_CSS}
 <div class="pivot-wrap">
   <table class="pivot-tbl">
     <thead>{hdr}</thead>
@@ -411,11 +402,9 @@ with st.sidebar:
     use_m3 = st.toggle("천m³ 단위로 변환", value=False)
     if use_m3:
         calorific = st.number_input(
-            "열량 (MJ/m³)",
-            min_value=1.0, max_value=100.0,
+            "열량 (MJ/m³)", min_value=1.0, max_value=100.0,
             value=42.563, step=0.001, format="%.3f",
-            help="GJ → 천m³ 변환: GJ ÷ 열량(MJ/m³) × 1,000"
-        )
+            help="GJ → 천m³ 변환: GJ ÷ 열량(MJ/m³) × 1,000")
         st.caption(f"GJ ÷ {calorific:.3f} × 1,000 = 천m³")
     else:
         calorific = 42.563
@@ -423,20 +412,16 @@ with st.sidebar:
 # ──────────────────────────────────────────────
 # 단위 변환 헬퍼
 # ──────────────────────────────────────────────
-def gj_to_unit(val: float) -> float:
-    """GJ → 천m³ 변환 (use_m3=True 일 때)"""
-    if use_m3:
-        return val / calorific * 1_000
+def gj_to_unit(val):
+    if use_m3: return val / calorific * 1_000
     return val
 
-def unit_label() -> str:
+def unit_label():
     return "천m³" if use_m3 else "GJ"
 
-def fmt_unit(val: float, decimals: int = 0, sign: bool = False) -> str:
-    """단위 변환 적용 후 포맷 문자열 반환"""
+def fmt_unit(val, decimals=0, sign=False):
     import math
-    if math.isnan(val):
-        return "-"
+    if math.isnan(val): return "-"
     v = gj_to_unit(val)
     fmt = f"{{:+,.{decimals}f}}" if sign else f"{{:,.{decimals}f}}"
     return fmt.format(v)
@@ -501,18 +486,17 @@ common_products = [p for p in OLD_COL_MAP.keys() if p in new_result["상품"].un
 # ══════════════════════════════════════════════
 # TAB
 # ══════════════════════════════════════════════
-tab0, tab1, tab2 = st.tabs([
+tab0, tab1, tab2, tab3 = st.tabs([
     "📊 전체 비교 (매트릭스)",
     "🔍 이전방식 vs 신규방식 상세 비교",
     "📋 구성비 및 raw 데이터 확인",
+    "🏛️ 비율적용 물량 vs KOGAS제출 물량",
 ])
 
 # ══════════════════════════════════════════════
-# TAB 0 : 전체 비교 매트릭스 (HTML rowspan 테이블)
+# TAB 0 : 전체 비교 매트릭스
 # ══════════════════════════════════════════════
 with tab0:
-
-    # ── 피벗 데이터 생성
     old_pivot, old_rtypes = build_pivot_flat(old_result, "공급량_GJ")
     new_pivot, new_rtypes = build_pivot_flat(new_result, "공급량_GJ")
 
@@ -520,14 +504,12 @@ with tab0:
     date_cols_new = [c for c in new_pivot.columns if c not in ("정산그룹","정산항목")]
     common_date_cols = sorted(set(date_cols_old) & set(date_cols_new))
 
-    # 차이(GJ)
     diff_num = (new_pivot[common_date_cols].values.astype(float) -
                 old_pivot[common_date_cols].values.astype(float))
     diff_pivot = old_pivot[["정산그룹","정산항목"]].copy()
     for j, col in enumerate(common_date_cols):
         diff_pivot[col] = diff_num[:, j]
 
-    # 차이율(%)
     old_num = old_pivot[common_date_cols].values.astype(float)
     with np.errstate(divide="ignore", invalid="ignore"):
         pct_num = np.where(old_num != 0, diff_num / old_num * 100, np.nan)
@@ -535,58 +517,32 @@ with tab0:
     for j, col in enumerate(common_date_cols):
         pct_pivot[col] = pct_num[:, j]
 
-    # ── 단위 레이블
     _ul = unit_label()
 
-    # ── 이전방식
     st.markdown(f'<div class="sub">📋 이전방식 — 상품별 월별 공급량 ({_ul})</div>', unsafe_allow_html=True)
-    st.html(build_html_pivot(
-        old_pivot, old_rtypes,
-        fmt_func=lambda v: fmt_unit(v, decimals=0),
-        diff_mode=False, gradient=True,
-    ))
+    st.html(build_html_pivot(old_pivot, old_rtypes, fmt_func=lambda v: fmt_unit(v, decimals=0), diff_mode=False, gradient=True))
 
-    # ── 신규방식
     st.markdown(f'<div class="sub">📋 신규방식 — 상품별 월별 공급량 ({_ul})</div>', unsafe_allow_html=True)
-    st.html(build_html_pivot(
-        new_pivot, new_rtypes,
-        fmt_func=lambda v: fmt_unit(v, decimals=0),
-        diff_mode=False, gradient=True,
-    ))
+    st.html(build_html_pivot(new_pivot, new_rtypes, fmt_func=lambda v: fmt_unit(v, decimals=0), diff_mode=False, gradient=True))
 
-    # ── 차이(GJ or 천m³)
     st.markdown(f'<div class="sub">📋 차이 (신규 − 이전, {_ul}) — 클수록 진한 색상</div>', unsafe_allow_html=True)
-    st.html(build_html_pivot(
-        diff_pivot, new_rtypes,
-        fmt_func=lambda v: fmt_unit(v, decimals=0, sign=True),
-        diff_mode=True, gradient=True,
-    ))
+    st.html(build_html_pivot(diff_pivot, new_rtypes, fmt_func=lambda v: fmt_unit(v, decimals=0, sign=True), diff_mode=True, gradient=True))
 
-    # ── 차이율(%) — 단위 변환 불필요 (비율이므로)
     st.markdown('<div class="sub">📋 차이율 (%, 신규/이전 기준) — 클수록 진한 색상</div>', unsafe_allow_html=True)
     def fmt_pct(v):
         if np.isnan(v): return "-"
         return f"{v:+.2f}%"
-    st.html(build_html_pivot(
-        pct_pivot, new_rtypes,
-        fmt_func=fmt_pct,
-        diff_mode=True, gradient=True,
-    ))
+    st.html(build_html_pivot(pct_pivot, new_rtypes, fmt_func=fmt_pct, diff_mode=True, gradient=True))
 
-    # ── 엑셀 다운로드
     buf_matrix = BytesIO()
     with pd.ExcelWriter(buf_matrix, engine="openpyxl") as w:
         old_pivot.to_excel(w, sheet_name="이전방식", index=False)
         new_pivot.to_excel(w, sheet_name="신규방식", index=False)
         diff_pivot.to_excel(w, sheet_name="차이_GJ", index=False)
         pct_pivot.to_excel(w, sheet_name="차이율_%", index=False)
-    st.download_button(
-        "⬇️ 전체 매트릭스 엑셀 다운로드", data=buf_matrix.getvalue(),
+    st.download_button("⬇️ 전체 매트릭스 엑셀 다운로드", data=buf_matrix.getvalue(),
         file_name=f"전체매트릭스_{y_start}_{y_end}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        key="dl_matrix",
-    )
-
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_matrix")
 
 # ══════════════════════════════════════════════
 # TAB 1 : 상품별 상세 비교
@@ -602,15 +558,13 @@ with tab1:
 
     selected_product = st.selectbox(
         "비교할 상품 선택", options=common_products,
-        index=common_products.index("개별난방용") if "개별난방용" in common_products else 0,
-    )
+        index=common_products.index("개별난방용") if "개별난방용" in common_products else 0)
 
     old_prod = old_result[old_result["상품"] == selected_product].set_index("연월")["공급량_GJ"]
     new_prod = new_result[new_result["상품"] == selected_product].set_index("연월")["공급량_GJ"]
     old_yr_p = old_prod.groupby(old_prod.index.year).sum()
     new_yr_p = new_prod.groupby(new_prod.index.year).sum()
     years_p  = sorted(set(old_yr_p.index) | set(new_yr_p.index))
-    # 단위 변환 적용
     old_vals = [gj_to_unit(old_yr_p.get(y, 0)) for y in years_p]
     new_vals = [gj_to_unit(new_yr_p.get(y, 0)) for y in years_p]
     old_vals_gj = [old_yr_p.get(y, 0) for y in years_p]
@@ -618,80 +572,52 @@ with tab1:
     pct_list = [(n-o)/o*100 if o else 0.0 for o,n in zip(old_vals_gj, new_vals_gj)]
     _ul = unit_label()
 
-    # 연도별 막대
     st.markdown(f'<div class="sub">📊 연도별 비교 — {selected_product} ({_ul})</div>', unsafe_allow_html=True)
     max_val = max(max(old_vals, default=1), max(new_vals, default=1))
     fig_cmp_yr = go.Figure()
-    fig_cmp_yr.add_trace(go.Bar(
-        x=[str(y) for y in years_p], y=old_vals,
-        name="이전방식", marker_color="#2c5f8a",
-        hovertemplate=f"이전방식<br>%{{x}}년<br>%{{y:,.1f}} {_ul}<extra></extra>",
-    ))
-    fig_cmp_yr.add_trace(go.Bar(
-        x=[str(y) for y in years_p], y=new_vals,
-        name="신규방식", marker_color="#e8501a",
-        hovertemplate=f"신규방식<br>%{{x}}년<br>%{{y:,.1f}} {_ul}<extra></extra>",
-    ))
+    fig_cmp_yr.add_trace(go.Bar(x=[str(y) for y in years_p], y=old_vals, name="이전방식", marker_color="#2c5f8a",
+        hovertemplate=f"이전방식<br>%{{x}}년<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+    fig_cmp_yr.add_trace(go.Bar(x=[str(y) for y in years_p], y=new_vals, name="신규방식", marker_color="#e8501a",
+        hovertemplate=f"신규방식<br>%{{x}}년<br>%{{y:,.1f}} {_ul}<extra></extra>"))
     annotations = []
     for y, pct, nv in zip(years_p, pct_list, new_vals):
         sign  = "+" if pct >= 0 else ""
         color = "#e8501a" if pct >= 0 else "#2c5f8a"
-        annotations.append(dict(
-            x=str(y), y=nv + max_val * 0.02,
-            text=f"<b>{sign}{pct:.1f}%</b>",
-            showarrow=False, font=dict(size=13, color=color),
-            xanchor="center", yanchor="bottom",
-        ))
-    fig_cmp_yr.update_layout(
-        barmode="group", height=460,
-        xaxis_title="연도", yaxis_title=f"공급량 ({_ul})",
+        annotations.append(dict(x=str(y), y=nv + max_val * 0.02, text=f"<b>{sign}{pct:.1f}%</b>",
+            showarrow=False, font=dict(size=13, color=color), xanchor="center", yanchor="bottom"))
+    fig_cmp_yr.update_layout(barmode="group", height=460, xaxis_title="연도", yaxis_title=f"공급량 ({_ul})",
         yaxis=dict(range=[0, max_val*1.15], showgrid=True, gridcolor="#ebebeb"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
-        plot_bgcolor="white", paper_bgcolor="white",
-        margin=dict(l=70,r=20,t=70,b=40), annotations=annotations,
-    )
+        plot_bgcolor="white", paper_bgcolor="white", margin=dict(l=70,r=20,t=70,b=40), annotations=annotations)
     st.plotly_chart(fig_cmp_yr, use_container_width=True)
 
-    # 월별 추이 라인
     st.markdown(f'<div class="sub">📈 월별 추이 비교 — {selected_product} ({_ul})</div>', unsafe_allow_html=True)
     st.caption("💡 마우스 휠: 확대/축소 | 드래그: 이동")
     old_prod_disp = old_prod.apply(gj_to_unit)
     new_prod_disp = new_prod.apply(gj_to_unit)
     fig_cmp_mo = go.Figure()
-    fig_cmp_mo.add_trace(go.Scatter(
-        x=old_prod_disp.index, y=old_prod_disp.values, name="이전방식",
+    fig_cmp_mo.add_trace(go.Scatter(x=old_prod_disp.index, y=old_prod_disp.values, name="이전방식",
         mode="lines", line=dict(color="#2c5f8a", width=2),
-        hovertemplate=f"이전방식<br>%{{x|%Y-%m}}<br>%{{y:,.1f}} {_ul}<extra></extra>",
-    ))
-    fig_cmp_mo.add_trace(go.Scatter(
-        x=new_prod_disp.index, y=new_prod_disp.values, name="신규방식",
+        hovertemplate=f"이전방식<br>%{{x|%Y-%m}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+    fig_cmp_mo.add_trace(go.Scatter(x=new_prod_disp.index, y=new_prod_disp.values, name="신규방식",
         mode="lines", line=dict(color="#e8501a", width=2, dash="dot"),
-        hovertemplate=f"신규방식<br>%{{x|%Y-%m}}<br>%{{y:,.1f}} {_ul}<extra></extra>",
-    ))
-    fig_cmp_mo.update_layout(
-        height=400, xaxis_title="연월", yaxis_title=f"공급량 ({_ul})",
+        hovertemplate=f"신규방식<br>%{{x|%Y-%m}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+    fig_cmp_mo.update_layout(height=400, xaxis_title="연월", yaxis_title=f"공급량 ({_ul})",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
-        plot_bgcolor="white", paper_bgcolor="white",
-        margin=dict(l=70,r=20,t=50,b=40), dragmode="pan",
-    )
+        plot_bgcolor="white", paper_bgcolor="white", margin=dict(l=70,r=20,t=50,b=40), dragmode="pan")
     fig_cmp_mo.update_yaxes(showgrid=True, gridcolor="#ebebeb", fixedrange=False)
     fig_cmp_mo.update_xaxes(fixedrange=False)
     st.plotly_chart(fig_cmp_mo, use_container_width=True,
         config={"scrollZoom":True,"displayModeBar":True,
-                "modeBarButtonsToAdd":["pan2d"],
-                "modeBarButtonsToRemove":["lasso2d","select2d"]})
+                "modeBarButtonsToAdd":["pan2d"],"modeBarButtonsToRemove":["lasso2d","select2d"]})
 
     st.markdown("---")
-
-    # 특정 연도 월별 비교
     st.markdown(f'<div class="sub">📊 특정 연도 월별 비교 — {selected_product} ({_ul})</div>', unsafe_allow_html=True)
     avail_years = sorted(set(old_prod.index.year) & set(new_prod.index.year))
     if not avail_years:
         st.info("공통 연도 데이터가 없습니다.")
     else:
-        sel_year = st.selectbox("연도 선택", options=avail_years,
-            index=len(avail_years)-1, key="sel_year_monthly")
-
+        sel_year = st.selectbox("연도 선택", options=avail_years, index=len(avail_years)-1, key="sel_year_monthly")
         old_yr_total_v    = old_yr_p.get(sel_year, 0)
         new_yr_total_v    = new_yr_p.get(sel_year, 0)
         old_yr_total_disp = gj_to_unit(old_yr_total_v)
@@ -701,7 +627,6 @@ with tab1:
         yr_pct     = yr_diff / old_yr_total_v * 100 if old_yr_total_v else 0
         sign_yr    = "+" if yr_pct >= 0 else ""
         pct_col    = "#e8501a" if yr_pct >= 0 else "#2c5f8a"
-
         st.markdown(f"""
         <div style="display:flex; gap:1rem; margin-bottom:1rem;">
             <div style="flex:1; background:#f4f8fc; border-left:4px solid #2c5f8a; padding:0.8rem 1.2rem; border-radius:4px;">
@@ -720,8 +645,7 @@ with tab1:
         </div>
         """, unsafe_allow_html=True)
 
-        MONTH_KR = ["1월","2월","3월","4월","5월","6월",
-                     "7월","8월","9월","10월","11월","12월"]
+        MONTH_KR = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"]
         old_mo = old_prod[old_prod.index.year == sel_year].copy()
         new_mo = new_prod[new_prod.index.year == sel_year].copy()
         old_mo.index = old_mo.index.month
@@ -734,92 +658,56 @@ with tab1:
         max_mo = max(max(old_mo_vals, default=1), max(new_mo_vals, default=1))
 
         fig_mo_yr = go.Figure()
-        fig_mo_yr.add_trace(go.Bar(
-            x=MONTH_KR, y=old_mo_vals, name="이전방식", marker_color="#2c5f8a",
-            hovertemplate=f"이전방식<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>",
-        ))
-        fig_mo_yr.add_trace(go.Bar(
-            x=MONTH_KR, y=new_mo_vals, name="신규방식", marker_color="#e8501a",
-            hovertemplate=f"신규방식<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>",
-        ))
+        fig_mo_yr.add_trace(go.Bar(x=MONTH_KR, y=old_mo_vals, name="이전방식", marker_color="#2c5f8a",
+            hovertemplate=f"이전방식<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+        fig_mo_yr.add_trace(go.Bar(x=MONTH_KR, y=new_mo_vals, name="신규방식", marker_color="#e8501a",
+            hovertemplate=f"신규방식<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
         mo_ann = []
         for m, pct, nv in zip(MONTH_KR, mo_pct, new_mo_vals):
             sign  = "+" if pct >= 0 else ""
             color = "#e8501a" if pct >= 0 else "#2c5f8a"
-            mo_ann.append(dict(
-                x=m, y=nv + max_mo * 0.02,
-                text=f"<b>{sign}{pct:.1f}%</b>",
-                showarrow=False, font=dict(size=13, color=color),
-                xanchor="center", yanchor="bottom",
-            ))
-        fig_mo_yr.update_layout(
-            barmode="group", height=420,
+            mo_ann.append(dict(x=m, y=nv + max_mo * 0.02, text=f"<b>{sign}{pct:.1f}%</b>",
+                showarrow=False, font=dict(size=13, color=color), xanchor="center", yanchor="bottom"))
+        fig_mo_yr.update_layout(barmode="group", height=420,
             title=dict(text=f"{sel_year}년 월별 비교 — {selected_product}", font=dict(size=15)),
             xaxis_title="월", yaxis_title=f"공급량 ({_ul})",
             yaxis=dict(range=[0, max_mo*1.18], showgrid=True, gridcolor="#ebebeb"),
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
-            plot_bgcolor="white", paper_bgcolor="white",
-            margin=dict(l=70,r=20,t=80,b=40), annotations=mo_ann,
-        )
+            plot_bgcolor="white", paper_bgcolor="white", margin=dict(l=70,r=20,t=80,b=40), annotations=mo_ann)
         st.plotly_chart(fig_mo_yr, use_container_width=True)
 
-        col_name = f"이전방식_{_ul}"
+        col_name  = f"이전방식_{_ul}"
         col_name2 = f"신규방식_{_ul}"
         diff_vals = [n-o for o,n in zip(old_mo_vals, new_mo_vals)]
-        tbl_mo_yr = pd.DataFrame({
-            col_name:  old_mo_vals,
-            col_name2: new_mo_vals,
-            f"차이_{_ul}": diff_vals,
-            "차이(%)":  mo_pct,
-        }, index=MONTH_KR)
+        tbl_mo_yr = pd.DataFrame({col_name: old_mo_vals, col_name2: new_mo_vals,
+            f"차이_{_ul}": diff_vals, "차이(%)": mo_pct}, index=MONTH_KR)
         tbl_mo_yr.index.name = "월"
-        subtotal_mo = pd.DataFrame([{
-            col_name:  sum(old_mo_vals),
-            col_name2: sum(new_mo_vals),
+        subtotal_mo = pd.DataFrame([{col_name: sum(old_mo_vals), col_name2: sum(new_mo_vals),
             f"차이_{_ul}": sum(diff_vals),
             "차이(%)": (sum(new_mo_gj)-sum(old_mo_gj))/sum(old_mo_gj)*100 if sum(old_mo_gj) else 0.0,
         }], index=[SUBTOTAL_LABEL])
         subtotal_mo.index.name = "월"
         tbl_mo_full = pd.concat([tbl_mo_yr, subtotal_mo])
-        fmt_dict = {col_name:"{:,.1f}", col_name2:"{:,.1f}",
-                    f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}
-        st.dataframe(
-            tbl_mo_full.style
-                .format(fmt_dict)
-                .apply(style_subtotal_any, axis=None)
-                .map(color_pct, subset=["차이(%)"]),
-            use_container_width=True,
-        )
+        fmt_dict = {col_name:"{:,.1f}", col_name2:"{:,.1f}", f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}
+        st.dataframe(tbl_mo_full.style.format(fmt_dict).apply(style_subtotal_any, axis=None)
+            .map(color_pct, subset=["차이(%)"]), use_container_width=True)
 
-    # 연도별 비교 테이블 (소계 없음)
     st.markdown(f'<div class="sub">📋 연도별 비교 테이블 — {selected_product}</div>', unsafe_allow_html=True)
     col_o = f"이전방식_{_ul}"
     col_n = f"신규방식_{_ul}"
-    tbl_cmp = pd.DataFrame({
-        col_o: old_yr_p.apply(gj_to_unit),
-        col_n: new_yr_p.apply(gj_to_unit),
-    }).fillna(0).round(1)
+    tbl_cmp = pd.DataFrame({col_o: old_yr_p.apply(gj_to_unit), col_n: new_yr_p.apply(gj_to_unit)}).fillna(0).round(1)
     tbl_cmp[f"차이_{_ul}"] = (tbl_cmp[col_n] - tbl_cmp[col_o]).round(1)
-    tbl_cmp["차이(%)"] = (
-        (new_yr_p - old_yr_p).fillna(0) / old_yr_p.replace(0, float("nan")) * 100
-    ).round(2)
+    tbl_cmp["차이(%)"] = ((new_yr_p - old_yr_p).fillna(0) / old_yr_p.replace(0, float("nan")) * 100).round(2)
     tbl_cmp.index.name = "연도"
-    st.dataframe(
-        tbl_cmp.style
-            .format({col_o:"{:,.1f}", col_n:"{:,.1f}",
-                     f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"})
-            .map(color_pct, subset=["차이(%)"]),
-        use_container_width=True,
-    )
+    st.dataframe(tbl_cmp.style.format({col_o:"{:,.1f}", col_n:"{:,.1f}",
+        f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}).map(color_pct, subset=["차이(%)"]),
+        use_container_width=True)
     buf_cmp = BytesIO()
     with pd.ExcelWriter(buf_cmp, engine="openpyxl") as w:
         tbl_cmp.to_excel(w, sheet_name=f"{selected_product}_비교")
-    st.download_button(
-        f"⬇️ {selected_product} 비교 엑셀 다운로드", data=buf_cmp.getvalue(),
+    st.download_button(f"⬇️ {selected_product} 비교 엑셀 다운로드", data=buf_cmp.getvalue(),
         file_name=f"비교_{selected_product}_{y_start}_{y_end}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_cmp",
-    )
-
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_cmp")
 
 # ══════════════════════════════════════════════
 # TAB 2 : 구성비 및 raw 데이터 확인
@@ -830,20 +718,16 @@ with tab2:
         "🗃️ 상품별 공급량 원본 (신규방식)",
         "📅 월별 총 공급량 (구글시트 D2)",
     ])
-
     with sub1:
         st.markdown('<div class="sub">구성비 (%) — 가스공사 비용 정산 비율</div>', unsafe_allow_html=True)
         disp_ratio = ratio_df.copy()
-        disp_ratio = disp_ratio[[c for c in disp_ratio.columns
-                                  if pd.notna(c) and y_start <= c.year <= y_end]]
+        disp_ratio = disp_ratio[[c for c in disp_ratio.columns if pd.notna(c) and y_start <= c.year <= y_end]]
         disp_ratio.columns = [c.strftime("%Y-%m") for c in disp_ratio.columns]
         subtotal_r = pd.DataFrame([disp_ratio.sum(numeric_only=True)], index=[SUBTOTAL_LABEL])
         subtotal_r.index.name = disp_ratio.index.name
         disp_ratio_full = pd.concat([disp_ratio, subtotal_r])
-        st.dataframe(
-            disp_ratio_full.style.format("{:.4f}").apply(style_subtotal_any, axis=None),
-            use_container_width=True, height=460,
-        )
+        st.dataframe(disp_ratio_full.style.format("{:.4f}").apply(style_subtotal_any, axis=None),
+            use_container_width=True, height=460)
         buf_r = BytesIO()
         with pd.ExcelWriter(buf_r, engine="openpyxl") as w:
             disp_ratio_full.to_excel(w, sheet_name="구성비")
@@ -854,16 +738,13 @@ with tab2:
     with sub2:
         st.markdown('<div class="sub">상품별 월별 공급량 (GJ) — 구글시트 원본</div>', unsafe_allow_html=True)
         disp_sup = supply_df.copy()
-        disp_sup = disp_sup[[c for c in disp_sup.columns
-                              if pd.notna(c) and y_start <= c.year <= y_end]]
+        disp_sup = disp_sup[[c for c in disp_sup.columns if pd.notna(c) and y_start <= c.year <= y_end]]
         disp_sup.columns = [c.strftime("%Y-%m") for c in disp_sup.columns]
         subtotal_s = pd.DataFrame([disp_sup.sum(numeric_only=True)], index=[SUBTOTAL_LABEL])
         subtotal_s.index.name = disp_sup.index.name
         disp_sup_full = pd.concat([disp_sup, subtotal_s])
-        st.dataframe(
-            disp_sup_full.style.format("{:,.1f}").apply(style_subtotal_any, axis=None),
-            use_container_width=True, height=460,
-        )
+        st.dataframe(disp_sup_full.style.format("{:,.1f}").apply(style_subtotal_any, axis=None),
+            use_container_width=True, height=460)
         buf_s = BytesIO()
         with pd.ExcelWriter(buf_s, engine="openpyxl") as w:
             disp_sup_full.to_excel(w, sheet_name="상품별공급량")
@@ -877,13 +758,239 @@ with tab2:
         disp_total = total_filtered.copy()
         disp_total["연월"] = pd.to_datetime(disp_total["연월"]).dt.strftime("%Y-%m")
         disp_total["총공급량_GJ"] = disp_total["총공급량_GJ"].round(1)
-        st.dataframe(
-            disp_total.style.format({"총공급량_GJ": "{:,.1f}"}),
-            use_container_width=True, height=400,
-        )
+        st.dataframe(disp_total.style.format({"총공급량_GJ": "{:,.1f}"}), use_container_width=True, height=400)
         buf_t = BytesIO()
         with pd.ExcelWriter(buf_t, engine="openpyxl") as w:
             disp_total.to_excel(w, sheet_name="월별총공급량", index=False)
         st.download_button("⬇️ 월별 총 공급량 엑셀 다운로드", data=buf_t.getvalue(),
             file_name=f"월별총공급량_{y_start}_{y_end}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_total")
+
+# ══════════════════════════════════════════════
+# TAB 3 : 비율적용 물량 vs KOGAS 제출 물량
+# ══════════════════════════════════════════════
+with tab3:
+    st.markdown("""
+    <span class="badge-old">이전방식</span> 상품별 공급량 비율 적용 &nbsp;
+    <span class="badge-new">신규방식</span> 가스공사 비용 정산 비율 반영 &nbsp;
+    <span class="badge-kogas">KOGAS 제출</span> 한국가스공사 제출용 구성비 판매량계 (2025년)
+    <br><span style="color:#888; font-size:0.85rem; line-height:2.5;">
+    ※ KOGAS 제출 물량은 2025년 1~12월 데이터만 제공됩니다.</span>
+    <br>
+    """, unsafe_allow_html=True)
+
+    # ── 비교 방식 선택 (토글)
+    compare_mode = st.radio(
+        "비교 방식 선택",
+        options=["이전방식 vs KOGAS 제출 물량", "신규방식 vs KOGAS 제출 물량"],
+        index=0,
+        horizontal=True,
+        key="kogas_compare_mode",
+    )
+    use_old_mode = (compare_mode == "이전방식 vs KOGAS 제출 물량")
+
+    # ── 상품 선택
+    k_selected = st.selectbox(
+        "비교할 상품 선택", options=common_products,
+        index=common_products.index("개별난방용") if "개별난방용" in common_products else 0,
+        key="kogas_product_sel",
+    )
+
+    _ul = unit_label()
+
+    # ── 비교 대상 데이터 준비 (2025년만)
+    KOGAS_2025_MONTHS = _KOGAS_MONTHS  # 2025-01 ~ 2025-12
+
+    # KOGAS 상품별 GJ (2025년)
+    if k_selected in KOGAS_GJ.index:
+        kogas_prod_gj = KOGAS_GJ.loc[k_selected]  # Series, index=YYYY-MM
+    else:
+        kogas_prod_gj = pd.Series(0.0, index=KOGAS_2025_MONTHS)
+
+    # 비율적용 물량 (이전 or 신규) — 2025년 월별
+    if use_old_mode:
+        ratio_src = old_result[old_result["상품"] == k_selected].copy()
+        badge_label = "이전방식"
+        bar_color   = "#2c5f8a"
+    else:
+        ratio_src = new_result[new_result["상품"] == k_selected].copy()
+        badge_label = "신규방식"
+        bar_color   = "#e8501a"
+
+    ratio_src_2025 = ratio_src[ratio_src["연월"].dt.year == 2025].copy()
+    ratio_src_2025["연월_str"] = ratio_src_2025["연월"].dt.strftime("%Y-%m")
+    ratio_monthly = ratio_src_2025.set_index("연월_str")["공급량_GJ"].reindex(KOGAS_2025_MONTHS, fill_value=0)
+
+    MONTH_KR = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"]
+
+    ratio_vals_gj  = [ratio_monthly.get(m, 0) for m in KOGAS_2025_MONTHS]
+    kogas_vals_gj  = [float(kogas_prod_gj.get(m, 0)) for m in KOGAS_2025_MONTHS]
+    ratio_vals     = [gj_to_unit(v) for v in ratio_vals_gj]
+    kogas_vals     = [gj_to_unit(v) for v in kogas_vals_gj]
+    diff_vals_gj   = [r - k for r, k in zip(ratio_vals_gj, kogas_vals_gj)]
+    diff_vals      = [gj_to_unit(v) for v in diff_vals_gj]
+    mo_pct_k       = [(r - k) / k * 100 if k else 0.0 for r, k in zip(ratio_vals_gj, kogas_vals_gj)]
+
+    # ── 연간 요약 카드
+    ratio_annual   = sum(ratio_vals_gj)
+    kogas_annual   = sum(kogas_vals_gj)
+    annual_diff_gj = ratio_annual - kogas_annual
+    annual_pct     = annual_diff_gj / kogas_annual * 100 if kogas_annual else 0
+    sign_a         = "+" if annual_pct >= 0 else ""
+    card_c         = "#e8501a" if annual_pct >= 0 else "#2c5f8a"
+
+    c1, c2, c3 = st.columns(3)
+    c1.markdown(f"""<div style="background:#f4f8fc; border-left:4px solid {bar_color};
+        padding:0.8rem 1.2rem; border-radius:4px;">
+        <div style="font-size:0.8rem; color:#666;">{badge_label} 2025년 합계</div>
+        <div style="font-size:1.3rem; font-weight:700; color:{bar_color};">{gj_to_unit(ratio_annual):,.1f} {_ul}</div>
+    </div>""", unsafe_allow_html=True)
+    c2.markdown(f"""<div style="background:#f0f9f4; border-left:4px solid #2a7a4b;
+        padding:0.8rem 1.2rem; border-radius:4px;">
+        <div style="font-size:0.8rem; color:#666;">KOGAS 제출 2025년 합계</div>
+        <div style="font-size:1.3rem; font-weight:700; color:#2a7a4b;">{gj_to_unit(kogas_annual):,.1f} {_ul}</div>
+    </div>""", unsafe_allow_html=True)
+    c3.markdown(f"""<div style="background:#f9f9f9; border-left:4px solid {card_c};
+        padding:0.8rem 1.2rem; border-radius:4px;">
+        <div style="font-size:0.8rem; color:#666;">연간 차이 ({badge_label} − KOGAS)</div>
+        <div style="font-size:1.5rem; font-weight:800; color:{card_c};">{sign_a}{annual_pct:.2f}%</div>
+        <div style="font-size:0.8rem; color:#888;">{sign_a}{gj_to_unit(annual_diff_gj):,.1f} {_ul}</div>
+    </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 월별 막대 비교 차트
+    st.markdown(f'<div class="sub">📊 월별 비교 — {k_selected} ({_ul}) · 2025년</div>', unsafe_allow_html=True)
+    max_k = max(max(ratio_vals, default=1), max(kogas_vals, default=1))
+    fig_k = go.Figure()
+    fig_k.add_trace(go.Bar(x=MONTH_KR, y=ratio_vals, name=badge_label, marker_color=bar_color,
+        hovertemplate=f"{badge_label}<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+    fig_k.add_trace(go.Bar(x=MONTH_KR, y=kogas_vals, name="KOGAS 제출", marker_color="#2a7a4b",
+        hovertemplate=f"KOGAS 제출<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+    k_ann = []
+    for m, pct, rv in zip(MONTH_KR, mo_pct_k, ratio_vals):
+        sign  = "+" if pct >= 0 else ""
+        color = "#e8501a" if pct >= 0 else "#2c5f8a"
+        k_ann.append(dict(x=m, y=rv + max_k * 0.02, text=f"<b>{sign}{pct:.1f}%</b>",
+            showarrow=False, font=dict(size=12, color=color), xanchor="center", yanchor="bottom"))
+    fig_k.update_layout(barmode="group", height=440,
+        xaxis_title="월", yaxis_title=f"공급량 ({_ul})",
+        yaxis=dict(range=[0, max_k*1.18], showgrid=True, gridcolor="#ebebeb"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=70,r=20,t=60,b=40), annotations=k_ann)
+    st.plotly_chart(fig_k, use_container_width=True)
+
+    # ── 월별 추이 라인 차트
+    st.markdown(f'<div class="sub">📈 월별 추이 비교 — {k_selected} ({_ul})</div>', unsafe_allow_html=True)
+    st.caption("💡 마우스 휠: 확대/축소 | 드래그: 이동")
+    fig_k_line = go.Figure()
+    fig_k_line.add_trace(go.Scatter(x=MONTH_KR, y=ratio_vals, name=badge_label,
+        mode="lines+markers", line=dict(color=bar_color, width=2),
+        hovertemplate=f"{badge_label}<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+    fig_k_line.add_trace(go.Scatter(x=MONTH_KR, y=kogas_vals, name="KOGAS 제출",
+        mode="lines+markers", line=dict(color="#2a7a4b", width=2, dash="dot"),
+        hovertemplate=f"KOGAS 제출<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+    fig_k_line.update_layout(height=380, xaxis_title="월", yaxis_title=f"공급량 ({_ul})",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=70,r=20,t=40,b=40), dragmode="pan")
+    fig_k_line.update_yaxes(showgrid=True, gridcolor="#ebebeb", fixedrange=False)
+    fig_k_line.update_xaxes(fixedrange=False)
+    st.plotly_chart(fig_k_line, use_container_width=True,
+        config={"scrollZoom":True,"displayModeBar":True,
+                "modeBarButtonsToAdd":["pan2d"],"modeBarButtonsToRemove":["lasso2d","select2d"]})
+
+    st.markdown("---")
+
+    # ── 월별 비교 테이블 (소계 포함)
+    st.markdown(f'<div class="sub">📋 월별 비교 테이블 — {k_selected} (2025년)</div>', unsafe_allow_html=True)
+    col_r = f"{badge_label}_{_ul}"
+    col_kg = f"KOGAS제출_{_ul}"
+    tbl_k = pd.DataFrame({
+        col_r:           ratio_vals,
+        col_kg:          kogas_vals,
+        f"차이_{_ul}":   diff_vals,
+        "차이(%)":       mo_pct_k,
+    }, index=MONTH_KR)
+    tbl_k.index.name = "월"
+    sub_k = pd.DataFrame([{
+        col_r:          sum(ratio_vals),
+        col_kg:         sum(kogas_vals),
+        f"차이_{_ul}":  sum(diff_vals),
+        "차이(%)":      (sum(ratio_vals_gj) - sum(kogas_vals_gj)) / sum(kogas_vals_gj) * 100
+                        if sum(kogas_vals_gj) else 0.0,
+    }], index=[SUBTOTAL_LABEL])
+    sub_k.index.name = "월"
+    tbl_k_full = pd.concat([tbl_k, sub_k])
+    fmt_k = {col_r:"{:,.1f}", col_kg:"{:,.1f}", f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}
+    st.dataframe(tbl_k_full.style.format(fmt_k).apply(style_subtotal_any, axis=None)
+        .map(color_pct, subset=["차이(%)"]), use_container_width=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # ── 전체 상품 연간 비교 테이블
+    st.markdown('<div class="sub">📋 전체 상품 연간 비교 — 2025년 합계</div>', unsafe_allow_html=True)
+    all_rows = []
+    for p in PRODUCT_LIST:
+        if use_old_mode:
+            p_src = old_result[old_result["상품"] == p]
+        else:
+            p_src = new_result[new_result["상품"] == p]
+        p_2025 = p_src[p_src["연월"].dt.year == 2025]["공급량_GJ"].sum()
+        k_2025 = float(KOGAS_GJ.loc[p, _KOGAS_MONTHS].sum()) if p in KOGAS_GJ.index else 0.0
+        diff_v  = p_2025 - k_2025
+        pct_v   = diff_v / k_2025 * 100 if k_2025 else 0.0
+        all_rows.append({
+            "상품":            p,
+            "그룹":            GROUP_MAP.get(p, "기타"),
+            col_r:             gj_to_unit(p_2025),
+            col_kg:            gj_to_unit(k_2025),
+            f"차이_{_ul}":    gj_to_unit(diff_v),
+            "차이(%)":         pct_v,
+        })
+    tbl_all = pd.DataFrame(all_rows).set_index("상품")
+    # 소계 행 추가
+    for grp, prods in [("주택용 소계", HOUSING_PRODUCTS), ("기타 소계", OTHER_PRODUCTS)]:
+        sub_r = tbl_all.loc[[p for p in prods if p in tbl_all.index], col_r].sum()
+        sub_k = tbl_all.loc[[p for p in prods if p in tbl_all.index], col_kg].sum()
+        sd    = sub_r - sub_k
+        sp    = sd / sub_k * 100 if sub_k else 0.0
+        tbl_all.loc[grp] = {"그룹": grp, col_r: sub_r, col_kg: sub_k, f"차이_{_ul}": sd, "차이(%)": sp}
+    # 합계 행
+    tot_r = tbl_all[tbl_all["그룹"].isin(["주택용","기타"])][col_r].sum()
+    tot_k = tbl_all[tbl_all["그룹"].isin(["주택용","기타"])][col_kg].sum()
+    td    = tot_r - tot_k
+    tp    = td / tot_k * 100 if tot_k else 0.0
+    tbl_all.loc["합 계"] = {"그룹": "전체", col_r: tot_r, col_kg: tot_k, f"차이_{_ul}": td, "차이(%)": tp}
+
+    sub_rows_idx = [i for i in tbl_all.index if "소계" in i or i == "합 계"]
+
+    def style_all_tbl(df):
+        styles = pd.DataFrame("", index=df.index, columns=df.columns)
+        for idx in sub_rows_idx:
+            if idx in df.index:
+                bg = "#ddeaf8" if "소계" in idx else "#c5d8f0"
+                styles.loc[idx] = f"background-color:{bg}; font-weight:bold; color:#1a3c5e;"
+        return styles
+
+    disp_cols = [col_r, col_kg, f"차이_{_ul}", "차이(%)"]
+    st.dataframe(
+        tbl_all[disp_cols].style
+            .format({col_r:"{:,.1f}", col_kg:"{:,.1f}", f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"})
+            .apply(style_all_tbl, axis=None)
+            .map(color_pct, subset=["차이(%)"]),
+        use_container_width=True, height=560,
+    )
+
+    # 엑셀 다운로드
+    buf_k = BytesIO()
+    with pd.ExcelWriter(buf_k, engine="openpyxl") as w:
+        tbl_k_full.to_excel(w, sheet_name=f"{k_selected}_월별비교")
+        tbl_all[disp_cols].to_excel(w, sheet_name="전체상품_연간비교")
+    st.download_button(
+        f"⬇️ KOGAS 비교 엑셀 다운로드", data=buf_k.getvalue(),
+        file_name=f"KOGAS비교_{k_selected}_2025.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key="dl_kogas",
+    )
