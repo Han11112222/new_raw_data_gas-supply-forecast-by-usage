@@ -19,7 +19,7 @@ h1 { color: #1a3c5e; border-bottom: 3px solid #e8501a; padding-bottom: 0.3rem; }
              padding:2px 10px; border-radius:12px; font-size:0.82rem; margin-right:6px; }
 .badge-new { display:inline-block; background:#e8501a; color:#fff;
              padding:2px 10px; border-radius:12px; font-size:0.82rem; margin-right:6px; }
-.badge-kogas { display:inline-block; background:#1a7fa8; color:#fff;
+.badge-kogas { display:inline-block; background:#0097b2; color:#fff;
              padding:2px 10px; border-radius:12px; font-size:0.82rem; margin-right:6px; }
 .info-box {
     background:#f4f8fc; border-radius:8px; padding:0.9rem 1.4rem;
@@ -811,11 +811,11 @@ with tab3:
     if use_old_mode:
         ratio_src = old_result[old_result["상품"] == k_selected].copy()
         badge_label = "이전방식"
-        bar_color   = "#3a7fc1"
+        bar_color   = "#1a3c6e"
     else:
         ratio_src = new_result[new_result["상품"] == k_selected].copy()
         badge_label = "신규방식"
-        bar_color   = "#5b5ea6"
+        bar_color   = "#2e86de"
 
     ratio_src_2025 = ratio_src[ratio_src["연월"].dt.year == 2025].copy()
     ratio_src_2025["연월_str"] = ratio_src_2025["연월"].dt.strftime("%Y-%m")
@@ -845,10 +845,10 @@ with tab3:
         <div style="font-size:0.8rem; color:#666;">{badge_label} 2025년 합계</div>
         <div style="font-size:1.3rem; font-weight:700; color:{bar_color};">{gj_to_unit(ratio_annual):,.1f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
-    c2.markdown(f"""<div style="background:#eaf4fb; border-left:4px solid #1a7fa8;
+    c2.markdown(f"""<div style="background:#e8f7fa; border-left:4px solid #0097b2;
         padding:0.8rem 1.2rem; border-radius:4px;">
         <div style="font-size:0.8rem; color:#666;">KOGAS 제출 2025년 합계</div>
-        <div style="font-size:1.3rem; font-weight:700; color:#1a7fa8;">{gj_to_unit(kogas_annual):,.1f} {_ul}</div>
+        <div style="font-size:1.3rem; font-weight:700; color:#0097b2;">{gj_to_unit(kogas_annual):,.1f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
     c3.markdown(f"""<div style="background:#f9f9f9; border-left:4px solid {card_c};
         padding:0.8rem 1.2rem; border-radius:4px;">
@@ -865,7 +865,7 @@ with tab3:
     fig_k = go.Figure()
     fig_k.add_trace(go.Bar(x=MONTH_KR, y=ratio_vals, name=badge_label, marker_color=bar_color,
         hovertemplate=f"{badge_label}<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
-    fig_k.add_trace(go.Bar(x=MONTH_KR, y=kogas_vals, name="KOGAS 제출", marker_color="#1a7fa8",
+    fig_k.add_trace(go.Bar(x=MONTH_KR, y=kogas_vals, name="KOGAS 제출", marker_color="#0097b2",
         hovertemplate=f"KOGAS 제출<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
     k_ann = []
     for m, pct, rv in zip(MONTH_KR, mo_pct_k, ratio_vals):
@@ -889,7 +889,7 @@ with tab3:
         mode="lines+markers", line=dict(color=bar_color, width=2),
         hovertemplate=f"{badge_label}<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
     fig_k_line.add_trace(go.Scatter(x=MONTH_KR, y=kogas_vals, name="KOGAS 제출",
-        mode="lines+markers", line=dict(color="#1a7fa8", width=2, dash="dot"),
+        mode="lines+markers", line=dict(color="#0097b2", width=2, dash="dot"),
         hovertemplate=f"KOGAS 제출<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
     fig_k_line.update_layout(height=380, xaxis_title="월", yaxis_title=f"공급량 ({_ul})",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
