@@ -50,10 +50,11 @@ GROUP_SPANS = [
     ("기타",   len(OTHER_PRODUCTS)   + 1),
 ]
 
-TOTAL_ROW_IDX   = 1
-DATE_HEADER_IDX = 3
-RATIO_DATA_ROWS  = [4, 5, 6, 7,   9, 10, 11, 12, 13, 14, 15, 16, 17]
-SUPPLY_DATA_ROWS = [24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37]
+TOTAL_ROW_IDX   = 1    # 행2(0-indexed=1): 총 공급량(GJ)
+DATE_HEADER_IDX = 5    # 행6(0-indexed=5): 날짜 헤더 (E열~)
+DATA_START_COL  = 4    # 데이터 시작 열 인덱스 (E열=4, A~D=0~3)
+RATIO_DATA_ROWS  = [6, 7, 8, 9,   11, 12, 13, 14, 15, 16, 17, 18, 19]   # 구성비 데이터 행
+SUPPLY_DATA_ROWS = [26, 27, 28, 29, 31, 32, 33, 34, 35, 36, 37, 38, 39] # 상품별분배 데이터 행
 
 SUBTOTAL_LABEL = "소 계"
 TOTAL_LABEL    = "합 계"
@@ -133,12 +134,14 @@ def load_new_gsheet():
         resp = requests.get(NEW_GSHEET_URL, timeout=20)
         resp.raise_for_status()
         raw = pd.read_csv(StringIO(resp.text), header=None)
-        dates = pd.to_datetime(raw.iloc[DATE_HEADER_IDX, 2:], errors="coerce")
+        # 날짜 헤더: 행6(0-indexed=5), E열(인덱스4)부터
+        dates = pd.to_datetime(raw.iloc[DATE_HEADER_IDX, DATA_START_COL:], errors="coerce")
         valid_cols = [i for i, d in enumerate(dates) if pd.notna(d)]
         dates_valid = dates.iloc[valid_cols]
 
+        # 총 공급량(GJ): 행2(0-indexed=1), E열(인덱스4)부터
         total_vals = pd.to_numeric(
-            raw.iloc[TOTAL_ROW_IDX, 2:].iloc[valid_cols]
+            raw.iloc[TOTAL_ROW_IDX, DATA_START_COL:].iloc[valid_cols]
             .astype(str).str.replace(",", ""), errors="coerce").values
         total_supply_df = pd.DataFrame({"연월": dates_valid.values, "총공급량_GJ": total_vals})
         total_supply_df = total_supply_df[total_supply_df["총공급량_GJ"] > 0].reset_index(drop=True)
@@ -149,7 +152,7 @@ def load_new_gsheet():
                 if row_i >= len(raw): continue
                 product = PRODUCT_LIST[idx]
                 vals = pd.to_numeric(
-                    raw.iloc[row_i, 2:].iloc[valid_cols]
+                    raw.iloc[row_i, DATA_START_COL:].iloc[valid_cols]
                     .astype(str).str.replace(",", ""), errors="coerce").values
                 result[product] = vals
             df = pd.DataFrame(result, index=dates_valid).T
