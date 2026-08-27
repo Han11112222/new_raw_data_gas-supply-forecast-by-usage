@@ -789,6 +789,117 @@ with tab3:
     )
     use_old_mode = (compare_mode == "이전방식 vs KOGAS 제출 물량")
 
+    _ul = unit_label()
+    KOGAS_2025_MONTHS = _KOGAS_MONTHS
+
+    # ── 비교 방식에 따른 레이블/색상 설정
+    if use_old_mode:
+        _badge_all  = "이전방식"
+        _color_all  = "#1a3c6e"
+        ratio_src_all = old_result[old_result["연월"].dt.year == 2025].copy()
+    else:
+        _badge_all  = "신규방식"
+        _color_all  = "#2e86de"
+        ratio_src_all = new_result[new_result["연월"].dt.year == 2025].copy()
+
+    # ── 전체 합계 비교 (상품 선택 전, 상단에 표시)
+    st.markdown('<div class="sub">📊 전체 합계량 비교 — 2025년 (모든 상품 합산)</div>', unsafe_allow_html=True)
+
+    # 월별 전체 합계
+    ratio_total_mo_gj = [
+        ratio_src_all[ratio_src_all["연월"].dt.strftime("%Y-%m") == m]["공급량_GJ"].sum()
+        for m in KOGAS_2025_MONTHS
+    ]
+    kogas_total_mo_gj = [float(KOGAS_GJ[m].sum()) for m in KOGAS_2025_MONTHS]
+
+    ratio_total_ann = sum(ratio_total_mo_gj)
+    kogas_total_ann = sum(kogas_total_mo_gj)
+    total_diff_gj   = ratio_total_ann - kogas_total_ann
+    total_pct       = total_diff_gj / kogas_total_ann * 100 if kogas_total_ann else 0
+    sign_t          = "+" if total_pct >= 0 else ""
+    card_ct         = "#e8501a" if total_pct >= 0 else "#2c5f8a"
+
+    # 연간 요약 카드 (전체 합계)
+    ca, cb, cc = st.columns(3)
+    ca.markdown(f"""<div style="background:#f4f8fc; border-left:4px solid {_color_all};
+        padding:0.8rem 1.2rem; border-radius:4px;">
+        <div style="font-size:0.8rem; color:#666;">{_badge_all} 2025년 전체 합계</div>
+        <div style="font-size:1.3rem; font-weight:700; color:{_color_all};">{gj_to_unit(ratio_total_ann):,.1f} {_ul}</div>
+    </div>""", unsafe_allow_html=True)
+    cb.markdown(f"""<div style="background:#e8f7fa; border-left:4px solid #0097b2;
+        padding:0.8rem 1.2rem; border-radius:4px;">
+        <div style="font-size:0.8rem; color:#666;">KOGAS 제출 2025년 전체 합계</div>
+        <div style="font-size:1.3rem; font-weight:700; color:#0097b2;">{gj_to_unit(kogas_total_ann):,.1f} {_ul}</div>
+    </div>""", unsafe_allow_html=True)
+    cc.markdown(f"""<div style="background:#f9f9f9; border-left:4px solid {card_ct};
+        padding:0.8rem 1.2rem; border-radius:4px;">
+        <div style="font-size:0.8rem; color:#666;">연간 차이 ({_badge_all} − KOGAS)</div>
+        <div style="font-size:1.5rem; font-weight:800; color:{card_ct};">{sign_t}{total_pct:.2f}%</div>
+        <div style="font-size:0.8rem; color:#888;">{sign_t}{gj_to_unit(total_diff_gj):,.1f} {_ul}</div>
+    </div>""", unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+
+    # 전체 합계 월별 막대 차트
+    MONTH_KR_ALL = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"]
+    ratio_total_disp = [gj_to_unit(v) for v in ratio_total_mo_gj]
+    kogas_total_disp = [gj_to_unit(v) for v in kogas_total_mo_gj]
+    mo_pct_total = [(r - k) / k * 100 if k else 0.0 for r, k in zip(ratio_total_mo_gj, kogas_total_mo_gj)]
+    max_t = max(max(ratio_total_disp, default=1), max(kogas_total_disp, default=1))
+
+    fig_total = go.Figure()
+    fig_total.add_trace(go.Bar(
+        x=MONTH_KR_ALL, y=ratio_total_disp, name=_badge_all, marker_color=_color_all,
+        hovertemplate=f"{_badge_all}<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>",
+    ))
+    fig_total.add_trace(go.Bar(
+        x=MONTH_KR_ALL, y=kogas_total_disp, name="KOGAS 제출", marker_color="#0097b2",
+        hovertemplate=f"KOGAS 제출<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>",
+    ))
+    ann_total = []
+    for m, pct, rv in zip(MONTH_KR_ALL, mo_pct_total, ratio_total_disp):
+        sign  = "+" if pct >= 0 else ""
+        color = "#e8501a" if pct >= 0 else "#2c5f8a"
+        ann_total.append(dict(x=m, y=rv + max_t * 0.02, text=f"<b>{sign}{pct:.1f}%</b>",
+            showarrow=False, font=dict(size=11, color=color), xanchor="center", yanchor="bottom"))
+    fig_total.update_layout(
+        barmode="group", height=420,
+        xaxis_title="월", yaxis_title=f"공급량 ({_ul})",
+        yaxis=dict(range=[0, max_t * 1.18], showgrid=True, gridcolor="#ebebeb"),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        plot_bgcolor="white", paper_bgcolor="white",
+        margin=dict(l=70, r=20, t=50, b=40), annotations=ann_total,
+    )
+    st.plotly_chart(fig_total, use_container_width=True)
+
+    # 전체 합계 월별 테이블
+    col_r_t  = f"{_badge_all}_{_ul}"
+    col_kg_t = f"KOGAS제출_{_ul}"
+    tbl_total = pd.DataFrame({
+        col_r_t:          ratio_total_disp,
+        col_kg_t:         kogas_total_disp,
+        f"차이_{_ul}":    [r - k for r, k in zip(ratio_total_disp, kogas_total_disp)],
+        "차이(%)":        mo_pct_total,
+    }, index=MONTH_KR_ALL)
+    tbl_total.index.name = "월"
+    sub_total = pd.DataFrame([{
+        col_r_t:         sum(ratio_total_disp),
+        col_kg_t:        sum(kogas_total_disp),
+        f"차이_{_ul}":   sum(ratio_total_disp) - sum(kogas_total_disp),
+        "차이(%)":       total_pct,
+    }], index=[SUBTOTAL_LABEL])
+    sub_total.index.name = "월"
+    tbl_total_full = pd.concat([tbl_total, sub_total])
+    fmt_total = {col_r_t:"{:,.1f}", col_kg_t:"{:,.1f}", f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}
+    st.dataframe(tbl_total_full.style.format(fmt_total)
+        .apply(style_subtotal_any, axis=None)
+        .map(color_pct, subset=["차이(%)"]), use_container_width=True)
+
+    st.markdown("---")
+
+    # ── 상품별 상세 비교
+    st.markdown('<div class="sub">🔍 상품별 상세 비교</div>', unsafe_allow_html=True)
+
     # ── 상품 선택
     k_selected = st.selectbox(
         "비교할 상품 선택", options=common_products,
@@ -796,26 +907,20 @@ with tab3:
         key="kogas_product_sel",
     )
 
-    _ul = unit_label()
-
-    # ── 비교 대상 데이터 준비 (2025년만)
-    KOGAS_2025_MONTHS = _KOGAS_MONTHS  # 2025-01 ~ 2025-12
-
+    # ── 비교 대상 데이터 준비 (2025년만) — _ul, KOGAS_2025_MONTHS 는 위에서 선언됨
     # KOGAS 상품별 GJ (2025년)
     if k_selected in KOGAS_GJ.index:
         kogas_prod_gj = KOGAS_GJ.loc[k_selected]  # Series, index=YYYY-MM
     else:
         kogas_prod_gj = pd.Series(0.0, index=KOGAS_2025_MONTHS)
 
-    # 비율적용 물량 (이전 or 신규) — 2025년 월별
+    # 비율적용 물량 (이전 or 신규) — badge_label, bar_color 설정
+    badge_label = _badge_all
+    bar_color   = _color_all
     if use_old_mode:
         ratio_src = old_result[old_result["상품"] == k_selected].copy()
-        badge_label = "이전방식"
-        bar_color   = "#1a3c6e"
     else:
         ratio_src = new_result[new_result["상품"] == k_selected].copy()
-        badge_label = "신규방식"
-        bar_color   = "#2e86de"
 
     ratio_src_2025 = ratio_src[ratio_src["연월"].dt.year == 2025].copy()
     ratio_src_2025["연월_str"] = ratio_src_2025["연월"].dt.strftime("%Y-%m")
