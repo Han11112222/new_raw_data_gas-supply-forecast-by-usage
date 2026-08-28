@@ -147,21 +147,17 @@ def load_new_gsheet():
         dates_valid = dates.iloc[valid_cols]
 
         # 총 공급량(GJ): 행2(0-indexed=1), C열(idx=2)부터
-        total_raw = raw.iloc[TOTAL_ROW_IDX, TOTAL_START_COL:].reset_index(drop=True)
-        # C열(2)부터, 헤더날짜는 D열(3)부터 → 인덱스 오프셋=1
-        total_vals = pd.to_numeric(
-            total_raw.iloc[[v + 1 for v in valid_cols]]
-            .astype(str).str.replace(",", ""), errors="coerce").values
-        total_supply_df = pd.DataFrame({"연월": dates_valid.values, "총공급량_GJ": total_vals})
-        total_supply_df = total_supply_df[total_supply_df["총공급량_GJ"] > 0].reset_index(drop=True)
-
         # 천연가스 공급량(GJ): 행4(0-indexed=3), C열(idx=2)부터 — BIO 제외 총량
+        # 전체 코드에서 이 값을 총량 기준으로 통일 사용
         natgas_raw = raw.iloc[NATGAS_ROW_IDX, TOTAL_START_COL:].reset_index(drop=True)
         natgas_vals = pd.to_numeric(
             natgas_raw.iloc[[v + 1 for v in valid_cols]]
             .astype(str).str.replace(",", ""), errors="coerce").values
         natgas_supply_df = pd.DataFrame({"연월": dates_valid.values, "천연가스공급량_GJ": natgas_vals})
         natgas_supply_df = natgas_supply_df[natgas_supply_df["천연가스공급량_GJ"] > 0].reset_index(drop=True)
+
+        # total_supply_df = 천연가스 공급량(행4) 기준으로 통일
+        total_supply_df = natgas_supply_df.rename(columns={"천연가스공급량_GJ": "총공급량_GJ"})
 
         def extract_rows(row_indices):
             result = {}
@@ -178,7 +174,7 @@ def load_new_gsheet():
 
         ratio_df  = extract_rows(RATIO_DATA_ROWS)
         supply_df = extract_rows(SUPPLY_DATA_ROWS)
-        return total_supply_df, natgas_supply_df, ratio_df, supply_df, dates_valid, None
+        return total_supply_df, ratio_df, supply_df, dates_valid, None
     except Exception as e:
         return None, None, None, None, str(e)
 
@@ -221,17 +217,34 @@ def load_old_from_github():
     except Exception as e:
         return None, str(e)
 
-def build_new_result(supply_df, ratio_df, y_start, y_end):
+def build_new_result(supply_df, ratio_df, y_start, y_end, natgas_series=None):
+    """
+    신규방식 공급량 계산.
+    natgas_series: 천연가스 공급량(행4, BIO 제외) Series (index=Timestamp).
+                   제공 시 상품별분배값을 행4 기준으로 보정.
+    """
     rows = []
     for col in supply_df.columns:
         if pd.isna(col) or not (y_start <= col.year <= y_end): continue
+        # 행4(천연가스) 보정 비율 계산
+        if natgas_series is not None and col in natgas_series.index:
+            ng_val = float(natgas_series[col])
+            col_str = col.strftime("%Y-%m") if hasattr(col, "strftime") else str(col)
+            # 상품별분배 합계 = 행2 총공급량 → 행4로 스케일 조정
+            sub_sum = sum(
+                float(supply_df.loc[p, col]) for p in PRODUCT_LIST if p in supply_df.index
+            )
+            scale = ng_val / sub_sum if sub_sum > 0 else 1.0
+        else:
+            scale = 1.0
         for product in PRODUCT_LIST:
             if product not in supply_df.index: continue
+            raw_val = float(supply_df.loc[product, col])
             rows.append({
                 "연월": col, "상품": product,
                 "그룹": GROUP_MAP.get(product, "기타"),
                 "구성비(%)": float(ratio_df.loc[product, col]) if product in ratio_df.index else 0.0,
-                "공급량_GJ": float(supply_df.loc[product, col]),
+                "공급량_GJ": raw_val * scale,  # 행4 기준으로 보정
             })
     df = pd.DataFrame(rows)
     if not df.empty:
@@ -479,7 +492,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── 데이터 로드
-total_supply_df, natgas_supply_df, ratio_df, supply_df, dates, gs_err = load_new_gsheet()
+total_supply_df, ratio_df, supply_df, dates, gs_err = load_new_gsheet()
 if gs_err or ratio_df is None:
     st.error(f"구글시트 로드 실패: {gs_err}")
     st.info("구글시트를 **링크가 있는 모든 사용자 → 뷰어** 로 공유 설정해 주세요.")
@@ -498,7 +511,12 @@ else:
         st.error(f"이전방식 파일 GitHub 로드 실패: {old_err}"); st.stop()
     st.sidebar.info("📡 이전방식 파일: GitHub 자동 사용")
 
-new_result = build_new_result(supply_df, ratio_df, y_start, y_end)
+# 천연가스 공급량(행4) Series 생성 — 신규방식 보정용
+_natgas_ts = total_supply_df.copy()
+_natgas_ts["연월"] = pd.to_datetime(_natgas_ts["연월"])
+_natgas_series_ts = _natgas_ts.set_index("연월")["총공급량_GJ"]
+
+new_result = build_new_result(supply_df, ratio_df, y_start, y_end, natgas_series=_natgas_series_ts)
 old_result = old_df[(old_df["연월"].dt.year >= y_start) &
                     (old_df["연월"].dt.year <= y_end)].copy()
 if not old_result.empty:
@@ -512,15 +530,15 @@ if new_result.empty:
     st.warning("선택 기간에 신규방식 데이터가 없습니다."); st.stop()
 
 # ── 천연가스 공급량(행4, BIO 제외) → 2025년 Series
-_ng_df = natgas_supply_df.copy()
+# total_supply_df가 이미 행4(천연가스) 기준으로 통일됨
+_ng_df = total_supply_df.copy()
 _ng_df["연월_str"] = pd.to_datetime(_ng_df["연월"]).dt.strftime("%Y-%m")
-_ng_series = _ng_df.set_index("연월_str")["천연가스공급량_GJ"]
+_ng_series = _ng_df.set_index("연월_str")["총공급량_GJ"]
 
 # 2025년 천연가스 공급량 (BIO 제외 총량)
 _ss_natgas_2025 = _ng_series.reindex(_KOGAS_MONTHS, fill_value=0)
 
 # KOGAS_GJ = 판매량 구성비(비율) × 천연가스 공급량(BIO 제외)
-# → KOGAS 구성비는 기존 그대로, 총량만 행4로 변경
 KOGAS_GJ = _KOGAS_RATIO.multiply(_ss_natgas_2025, axis=1)
 
 # 전체 합계 카드: KOGAS 총량 = 천연가스 공급량(BIO 제외)
@@ -801,8 +819,8 @@ with tab2:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_sup")
 
     with sub3:
-        st.markdown('<div class="sub">월별 총 공급량 (GJ) — 구글시트 D2행</div>', unsafe_allow_html=True)
-        st.caption("구글시트 2행의 총 공급량(GJ) — 신규방식 산출 기준")
+        st.markdown('<div class="sub">월별 천연가스 공급량 (GJ) — 구글시트 행4 (BIO 제외)</div>', unsafe_allow_html=True)
+        st.caption("구글시트 4행의 천연가스 공급량(GJ) — BIO가스 제외, 전체 코드 총량 기준")
         disp_total = total_filtered.copy()
         disp_total["연월"] = pd.to_datetime(disp_total["연월"]).dt.strftime("%Y-%m")
         disp_total["총공급량_GJ"] = disp_total["총공급량_GJ"].round(1)
