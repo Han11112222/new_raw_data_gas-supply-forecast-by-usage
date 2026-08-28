@@ -51,7 +51,8 @@ GROUP_SPANS = [
 ]
 
 TOTAL_ROW_IDX   = 1    # 행2(0-indexed=1): 총 공급량(GJ)
-TOTAL_START_COL = 2    # 총공급량 행은 C열(idx=2)부터 날짜 데이터
+NATGAS_ROW_IDX  = 3    # 행4(0-indexed=3): 천연가스 공급량(GJ) = BIO 제외 총량
+TOTAL_START_COL = 2    # 총공급량/천연가스 행은 C열(idx=2)부터 날짜 데이터
 DATE_HEADER_IDX = 25   # 행26(0-indexed=25): 상품별분배 날짜 헤더
 DATA_START_COL  = 3    # 구성비/분배 데이터 시작 열 (D열=3, A~C=0~2)
 # 구성비: 행5는 "구성비" 라벨, 행6~23까지 구성비 데이터
@@ -146,15 +147,21 @@ def load_new_gsheet():
         dates_valid = dates.iloc[valid_cols]
 
         # 총 공급량(GJ): 행2(0-indexed=1), C열(idx=2)부터
-        # 총공급량 행의 날짜 순서가 상품별분배 헤더와 동일한 열 오프셋으로 정렬
         total_raw = raw.iloc[TOTAL_ROW_IDX, TOTAL_START_COL:].reset_index(drop=True)
-        # 상품별분배 헤더(날짜)도 D열(idx=3)부터 → TOTAL_START_COL과 1열 차이
-        # 총공급량은 C열(2)부터, 헤더날짜는 D열(3)부터이므로 인덱스 오프셋=1
+        # C열(2)부터, 헤더날짜는 D열(3)부터 → 인덱스 오프셋=1
         total_vals = pd.to_numeric(
             total_raw.iloc[[v + 1 for v in valid_cols]]
             .astype(str).str.replace(",", ""), errors="coerce").values
         total_supply_df = pd.DataFrame({"연월": dates_valid.values, "총공급량_GJ": total_vals})
         total_supply_df = total_supply_df[total_supply_df["총공급량_GJ"] > 0].reset_index(drop=True)
+
+        # 천연가스 공급량(GJ): 행4(0-indexed=3), C열(idx=2)부터 — BIO 제외 총량
+        natgas_raw = raw.iloc[NATGAS_ROW_IDX, TOTAL_START_COL:].reset_index(drop=True)
+        natgas_vals = pd.to_numeric(
+            natgas_raw.iloc[[v + 1 for v in valid_cols]]
+            .astype(str).str.replace(",", ""), errors="coerce").values
+        natgas_supply_df = pd.DataFrame({"연월": dates_valid.values, "천연가스공급량_GJ": natgas_vals})
+        natgas_supply_df = natgas_supply_df[natgas_supply_df["천연가스공급량_GJ"] > 0].reset_index(drop=True)
 
         def extract_rows(row_indices):
             result = {}
@@ -171,7 +178,7 @@ def load_new_gsheet():
 
         ratio_df  = extract_rows(RATIO_DATA_ROWS)
         supply_df = extract_rows(SUPPLY_DATA_ROWS)
-        return total_supply_df, ratio_df, supply_df, dates_valid, None
+        return total_supply_df, natgas_supply_df, ratio_df, supply_df, dates_valid, None
     except Exception as e:
         return None, None, None, None, str(e)
 
@@ -184,7 +191,7 @@ OLD_COL_MAP = {
     "냉난방공조용": ["냉난방용"],
     "업무난방용":   ["업무난방용"],
     "산업용":       ["산업용"],
-    "수송용":       ["수송용(CNG)", "수송용(BIO)"],
+    "수송용":       ["수송용(CNG)"],   # BIO 제외
     "열병합용":     ["열병합용"],
     "연료전지용":   ["연료전지용"],
     "열전용설비용": ["열전용설비용(주택외)"],
@@ -472,7 +479,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── 데이터 로드
-total_supply_df, ratio_df, supply_df, dates, gs_err = load_new_gsheet()
+total_supply_df, natgas_supply_df, ratio_df, supply_df, dates, gs_err = load_new_gsheet()
 if gs_err or ratio_df is None:
     st.error(f"구글시트 로드 실패: {gs_err}")
     st.info("구글시트를 **링크가 있는 모든 사용자 → 뷰어** 로 공유 설정해 주세요.")
@@ -504,21 +511,23 @@ total_filtered = total_supply_df[
 if new_result.empty:
     st.warning("선택 기간에 신규방식 데이터가 없습니다."); st.stop()
 
-# ── KOGAS_GJ 계산 (전역)
-# = 판매량 구성비(비율) × 스프레드시트 월별 총 공급량
-# 스프레드시트 총 공급량을 YYYY-MM 인덱스 Series로 변환
-_ss_total = total_supply_df.copy()
-_ss_total["연월_str"] = pd.to_datetime(_ss_total["연월"]).dt.strftime("%Y-%m")
-_ss_total_series = _ss_total.set_index("연월_str")["총공급량_GJ"]  # Series: index=YYYY-MM
+# ── 천연가스 공급량(행4, BIO 제외) → 2025년 Series
+_ng_df = natgas_supply_df.copy()
+_ng_df["연월_str"] = pd.to_datetime(_ng_df["연월"]).dt.strftime("%Y-%m")
+_ng_series = _ng_df.set_index("연월_str")["천연가스공급량_GJ"]
 
-# 2025년 월별 총 공급량 (스프레드시트)
-_ss_total_2025 = _ss_total_series.reindex(_KOGAS_MONTHS, fill_value=0)
+# 2025년 천연가스 공급량 (BIO 제외 총량)
+_ss_natgas_2025 = _ng_series.reindex(_KOGAS_MONTHS, fill_value=0)
 
-# KOGAS_GJ = 판매량 구성비(비율) × 스프레드시트 총 공급량
-# index=상품, columns=YYYY-MM (2025-01~12)
-KOGAS_GJ = _KOGAS_RATIO.multiply(_ss_total_2025, axis=1)
-# _KOGAS_MONTHLY_TOTAL_GJ도 스프레드시트 총 공급량으로 재정의 (전체 합계 카드용)
-_KOGAS_MONTHLY_TOTAL_GJ = _ss_total_2025
+# KOGAS_GJ = 판매량 구성비(비율) × 천연가스 공급량(BIO 제외)
+# → KOGAS 구성비는 기존 그대로, 총량만 행4로 변경
+KOGAS_GJ = _KOGAS_RATIO.multiply(_ss_natgas_2025, axis=1)
+
+# 전체 합계 카드: KOGAS 총량 = 천연가스 공급량(BIO 제외)
+_KOGAS_MONTHLY_TOTAL_GJ = _ss_natgas_2025
+
+# 신규방식 총량도 천연가스 공급량(행4) 사용 — 2025년 비교용
+_SS_NEW_TOTAL_2025 = _ss_natgas_2025
 
 common_products = [p for p in OLD_COL_MAP.keys() if p in new_result["상품"].unique()]
 
@@ -810,11 +819,12 @@ with tab2:
 # ══════════════════════════════════════════════
 with tab3:
     st.markdown("""
-    <span class="badge-old">이전방식</span> 상품별 공급량 비율 적용 &nbsp;
-    <span class="badge-new">신규방식</span> 가스공사 비용 정산 비율 반영 &nbsp;
-    <span class="badge-kogas">KOGAS 제출</span> 한국가스공사 제출용 구성비 판매량계 (2025년)
+    <span class="badge-old">이전방식</span> 수송용 CNG만 적용 &nbsp;|&nbsp; BIO값을 제외한 총량 기준<br>
+    <span class="badge-new">신규방식</span> 가스공사 비용 정산 비율 반영 &nbsp;|&nbsp; BIO값을 제외한 총량 기준<br>
+    <span class="badge-kogas">KOGAS 제출</span> 판매량 기준 구성비 × BIO값을 제외한 총량
     <br><span style="color:#888; font-size:0.85rem; line-height:2.5;">
-    ※ KOGAS 제출 물량은 2025년 1~12월 데이터만 제공됩니다.</span>
+    ※ 세 방식 모두 <b>BIO가스를 제외한 천연가스 공급량(스프레드시트 행4)</b>을 비교 기준 총량으로 사용합니다.
+    &nbsp;|&nbsp; KOGAS 제출 물량은 2025년 1~12월 데이터만 제공됩니다.</span>
     <br>
     """, unsafe_allow_html=True)
 
@@ -851,6 +861,9 @@ with tab3:
     ]
     kogas_total_mo_gj = [float(_KOGAS_MONTHLY_TOTAL_GJ.get(m, 0)) for m in KOGAS_2025_MONTHS]
 
+    # 신규방식: 천연가스 공급량(행4, BIO 제외) 합계를 비교 기준으로 사용
+    if not use_old_mode:
+        ratio_total_mo_gj = [float(_SS_NEW_TOTAL_2025.get(m, 0)) for m in KOGAS_2025_MONTHS]
     ratio_total_ann = sum(ratio_total_mo_gj)
     kogas_total_ann = sum(kogas_total_mo_gj)
     total_diff_gj   = ratio_total_ann - kogas_total_ann
