@@ -51,8 +51,12 @@ GROUP_SPANS = [
 ]
 
 TOTAL_ROW_IDX   = 1    # 행2(0-indexed=1): 총 공급량(GJ)
-DATE_HEADER_IDX = 5    # 행6(0-indexed=5): 날짜 헤더 (E열~)
-DATA_START_COL  = 4    # 데이터 시작 열 인덱스 (E열=4, A~D=0~3)
+TOTAL_START_COL = 2    # 총공급량 행은 C열(idx=2)부터 날짜 데이터
+DATE_HEADER_IDX = 25   # 행26(0-indexed=25): 상품별분배 날짜 헤더
+DATA_START_COL  = 3    # 구성비/분배 데이터 시작 열 (D열=3, A~C=0~2)
+# 구성비: 행5는 "구성비" 라벨, 행6~23까지 구성비 데이터
+# 이미지 기준(0-indexed): 구성비 헤더=행5, 데이터행=행6~19
+# 상품별분배: 헤더=행25, 데이터행=행26~39
 RATIO_DATA_ROWS  = [6, 7, 8, 9,   11, 12, 13, 14, 15, 16, 17, 18, 19]   # 구성비 데이터 행
 SUPPLY_DATA_ROWS = [26, 27, 28, 29, 31, 32, 33, 34, 35, 36, 37, 38, 39] # 상품별분배 데이터 행
 
@@ -116,14 +120,16 @@ _KOGAS_SALES_DF = pd.DataFrame(
 ).T
 _KOGAS_SALES_DF.index.name = "상품"
 
-# 월별 판매량 합계(GJ) — 비교 기준 총량
-_KOGAS_MONTHLY_TOTAL_GJ = _KOGAS_SALES_DF.sum(axis=0)  # Series: index=YYYY-MM
+# 판매량 월별 합계(GJ) — 구성비 분모
+_KOGAS_SALES_TOTAL_GJ = _KOGAS_SALES_DF.sum(axis=0)  # Series: index=YYYY-MM
 
-# 판매량 기준 구성비(%) 재계산
-_KOGAS_RATIO = _KOGAS_SALES_DF.div(_KOGAS_MONTHLY_TOTAL_GJ) * 100  # index=상품, columns=YYYY-MM
+# 판매량 기준 구성비(비율, 0~1) — index=상품, columns=YYYY-MM
+_KOGAS_RATIO = _KOGAS_SALES_DF.div(_KOGAS_SALES_TOTAL_GJ)
 
-# KOGAS_GJ: 비율적용 물량과 비교할 상품별 KOGAS 판매량(GJ)
-KOGAS_GJ = _KOGAS_SALES_DF.copy()
+# KOGAS_GJ는 스프레드시트 총 공급량 로드 후 계산
+# = 판매량 구성비 × 스프레드시트 월별 총 공급량
+# (아래 데이터 로드 완료 후 build_kogas_gj() 호출로 설정)
+KOGAS_GJ = None  # placeholder
 
 # ──────────────────────────────────────────────
 # 데이터 로드
@@ -134,14 +140,18 @@ def load_new_gsheet():
         resp = requests.get(NEW_GSHEET_URL, timeout=20)
         resp.raise_for_status()
         raw = pd.read_csv(StringIO(resp.text), header=None)
-        # 날짜 헤더: 행6(0-indexed=5), E열(인덱스4)부터
+        # 상품별분배 날짜 헤더: 행26(0-indexed=25), D열(idx=3)부터
         dates = pd.to_datetime(raw.iloc[DATE_HEADER_IDX, DATA_START_COL:], errors="coerce")
         valid_cols = [i for i, d in enumerate(dates) if pd.notna(d)]
         dates_valid = dates.iloc[valid_cols]
 
-        # 총 공급량(GJ): 행2(0-indexed=1), E열(인덱스4)부터
+        # 총 공급량(GJ): 행2(0-indexed=1), C열(idx=2)부터
+        # 총공급량 행의 날짜 순서가 상품별분배 헤더와 동일한 열 오프셋으로 정렬
+        total_raw = raw.iloc[TOTAL_ROW_IDX, TOTAL_START_COL:].reset_index(drop=True)
+        # 상품별분배 헤더(날짜)도 D열(idx=3)부터 → TOTAL_START_COL과 1열 차이
+        # 총공급량은 C열(2)부터, 헤더날짜는 D열(3)부터이므로 인덱스 오프셋=1
         total_vals = pd.to_numeric(
-            raw.iloc[TOTAL_ROW_IDX, DATA_START_COL:].iloc[valid_cols]
+            total_raw.iloc[[v + 1 for v in valid_cols]]
             .astype(str).str.replace(",", ""), errors="coerce").values
         total_supply_df = pd.DataFrame({"연월": dates_valid.values, "총공급량_GJ": total_vals})
         total_supply_df = total_supply_df[total_supply_df["총공급량_GJ"] > 0].reset_index(drop=True)
@@ -493,6 +503,22 @@ total_filtered = total_supply_df[
 
 if new_result.empty:
     st.warning("선택 기간에 신규방식 데이터가 없습니다."); st.stop()
+
+# ── KOGAS_GJ 계산 (전역)
+# = 판매량 구성비(비율) × 스프레드시트 월별 총 공급량
+# 스프레드시트 총 공급량을 YYYY-MM 인덱스 Series로 변환
+_ss_total = total_supply_df.copy()
+_ss_total["연월_str"] = pd.to_datetime(_ss_total["연월"]).dt.strftime("%Y-%m")
+_ss_total_series = _ss_total.set_index("연월_str")["총공급량_GJ"]  # Series: index=YYYY-MM
+
+# 2025년 월별 총 공급량 (스프레드시트)
+_ss_total_2025 = _ss_total_series.reindex(_KOGAS_MONTHS, fill_value=0)
+
+# KOGAS_GJ = 판매량 구성비(비율) × 스프레드시트 총 공급량
+# index=상품, columns=YYYY-MM (2025-01~12)
+KOGAS_GJ = _KOGAS_RATIO.multiply(_ss_total_2025, axis=1)
+# _KOGAS_MONTHLY_TOTAL_GJ도 스프레드시트 총 공급량으로 재정의 (전체 합계 카드용)
+_KOGAS_MONTHLY_TOTAL_GJ = _ss_total_2025
 
 common_products = [p for p in OLD_COL_MAP.keys() if p in new_result["상품"].unique()]
 
