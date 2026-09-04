@@ -545,10 +545,16 @@ st.markdown("""
   </div>
   <div class="info-row">
     <div><span class="badge-new">신규방식</span></div>
-    <div>총 공급량 = 천연가스 공급량(행4) &nbsp;|&nbsp; 재무팀 상품별 실측 공급량 기준 구성비 반영</div>
+    <div>천연가스 공급량 = 총공급량 − BIO가스 &nbsp;|&nbsp; 재무팀 상품별 비율 적용</div>
+  </div>
+  <div class="info-row">
+    <div><span class="badge-kogas">KOGAS 제출</span></div>
+    <div>가스공사 제출용 판매량(MJ) 기준 구성비 × 천연가스 공급량(BIO 제외)</div>
   </div>
   <div style="margin-top:6px; color:#888; font-size:0.85rem;">
-    ※ 이전방식과 신규방식은 상품별 비율 산출 기준이 달라 상품별 공급량이 다를 수 있습니다.
+    ※ 세 방식은 상품별 비율 산출 기준이 달라 상품별 공급량이 다를 수 있습니다.
+    &nbsp;|&nbsp; 이전방식 총량은 GitHub 실적 파일의 상품별 합산값을, 신규방식/KOGAS 비교의 기준 총량은
+    구글시트 천연가스 공급량(행4, BIO 제외)을 사용합니다.
   </div>
 </div>
 """, unsafe_allow_html=True)
@@ -687,15 +693,6 @@ with tab0:
 # TAB 1 : 상품별 상세 비교
 # ══════════════════════════════════════════════
 with tab1:
-    st.markdown("""
-    <span class="badge-old">이전방식</span> 상품별 공급량 비율 적용 &nbsp;
-    <span class="badge-new">신규방식</span> 재무팀 실측 상품별 공급량 기준 구성비 반영
-    <br><span style="color:#888; font-size:0.85rem; line-height:2.5;">
-    ※ 신규방식은 천연가스 공급량(구글시트 행4)을 기준 총량으로, 재무팀 실측 상품별 공급량(D49:ZZ62)으로 산출한
-    구성비를 곱해 상품별로 배분합니다.</span>
-    <br><br>
-    """, unsafe_allow_html=True)
-
     selected_product = st.selectbox(
         "비교할 상품 선택", options=common_products,
         index=common_products.index("개별난방용") if "개별난방용" in common_products else 0)
@@ -913,10 +910,7 @@ with tab2:
 # ══════════════════════════════════════════════
 with tab3:
     st.markdown("""
-    <span class="badge-old">이전방식</span> 수송용 CNG만 적용 &nbsp;|&nbsp; BIO값을 제외한 총량 기준<br>
-    <span class="badge-new">신규방식</span> 재무팀 실측 상품별 공급량 기준 구성비 반영 &nbsp;|&nbsp; BIO값을 제외한 총량 기준<br>
-    <span class="badge-kogas">KOGAS 제출</span> 판매량 기준 구성비 × BIO값을 제외한 총량
-    <br><span style="color:#888; font-size:0.85rem; line-height:2.5;">
+    <span style="color:#888; font-size:0.85rem; line-height:2.5;">
     ※ 세 방식 모두 <b>BIO가스를 제외한 천연가스 공급량(스프레드시트 행4)</b>을 비교 기준 총량으로 사용합니다.
     &nbsp;|&nbsp; KOGAS 제출 물량은 2025년 1~12월 데이터만 제공됩니다.</span>
     <br>
