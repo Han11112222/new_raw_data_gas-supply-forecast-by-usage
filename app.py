@@ -26,7 +26,8 @@ h1 { color: #1a3c5e; border-bottom: 3px solid #e8501a; padding-bottom: 0.3rem; }
     margin-bottom:1rem; border-left:4px solid #2c5f8a;
     font-size:0.92rem; line-height:2.2;
 }
-.info-row { display:grid; grid-template-columns:90px 1fr; align-items:center; gap:0 8px; }
+.info-row { display:grid; grid-template-columns:110px 1fr; align-items:center; gap:0 8px; }
+.info-row .badge-old, .info-row .badge-new, .info-row .badge-kogas { white-space:nowrap; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -549,7 +550,7 @@ st.markdown("""
   </div>
   <div class="info-row">
     <div><span class="badge-kogas">KOGAS 제출</span></div>
-    <div>가스공사 제출용 판매량(MJ) 기준 구성비 × 천연가스 공급량(BIO 제외)</div>
+    <div>수급량 비용 정산시 사용하는 물량</div>
   </div>
   <div style="margin-top:6px; color:#888; font-size:0.85rem;">
     ※ 세 방식은 상품별 비율 산출 기준이 달라 상품별 공급량이 다를 수 있습니다.
