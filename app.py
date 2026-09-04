@@ -68,72 +68,11 @@ SUBTOTAL_LABEL = "소 계"
 TOTAL_LABEL    = "합 계"
 SUBTOTAL_STYLE = "background-color:#ddeaf8; font-weight:bold; color:#1a3c5e;"
 
-# ──────────────────────────────────────────────
-# KOGAS 제출 물량 — 판매량(MJ) 기준으로 구성비 재계산
-# 출처: 한국가스공사 제출용 구성비 2025.01~12 / 판매량(MJ) 열 사용
-# ──────────────────────────────────────────────
-_KOGAS_SALES_MJ = {
-    # 판매량(MJ) — 자가소모 제외한 순수 판매량
-    "취사용":       [22508020,      22577641.8714,  20619854.7301,  20555869.5196,
-                    19464912.8195,  19208315.8503,  18486609.9488,  18781399.7069,
-                    18023947.6279,  19973230.6939,  20033611.0042,  21151638.5849],
-    "개별난방용":   [4601772442,    4661302339.4723, 3160609816.0333, 1642867844.6371,
-                    1057371508.7759, 634292658.3708, 483145021.0925, 425021509.6008,
-                    480674701.0690, 1029298145.8647, 2461104910.2985, 4453646847.3386],
-    "중앙난방용":   [108064211,     98122572.1497,  81515348.4942,  44989505.3968,
-                    24135510.9806,  16827651.0218,  11960106.1481,  9572967.6972,
-                    12346635.2679,  28037892.3927,  57492331.3318,  88198469.7410],
-    "자가열전용":   [73321702,      68217256.5968,  41847586.5865,  18126708.0430,
-                    9789260.3598,   7013854.5389,   3642302.4638,   3536621.0753,
-                    4359081.8933,   11459312.1309,  31970956.4170,  60710880.2353],
-    "일반용":       [380155058,     345892153.1467, 358364786.5859, 303131726.6613,
-                    287013884.3114, 243920918.5071, 232490040.0485, 217981730.6294,
-                    226816417.4180, 272478528.0234, 310414128.6169, 372453589.7506],
-    "냉난방공조용": [163484146,     168032417.4858, 84622567.2968,  32106464.4654,
-                    51663085.1967,  138471075.4124, 211499706.1630, 222730024.3879,
-                    167565544.1565, 54068568.5656,  61819400.6836,  141045583.6353],
-    "업무난방용":   [105831937,     137872849.5697, 87183302.6296,  44438606.8873,
-                    20288170.9532,  21330580.2042,  17996786.4652,  17198446.9251,
-                    18977535.4561,  18899535.3144,  69087649.5126,  120826118.7412],
-    "산업용":       [876935403,     883940217.5498, 824439602.0200, 793061906.6426,
-                    728629307.8986, 690310823.8775, 706786817.5483, 659943859.4157,
-                    725048473.1511, 685046725.1428, 817465931.5638, 847848530.7028],
-    "수송용":       [245230758,     236341015.6950, 251630783.5494, 251298300.9538,
-                    262403158.8939, 259332171.3476, 282160534.9959, 277821651.0915,
-                    266680584.4900, 249985920.3632, 250148113.8952, 264560653.6417],
-    "열병합용":     [25962363,      24585055.9268,  25513126.0772,  22323074.6776,
-                    17784555.5029,  10947906.8965,  17472109.5237,  17776482.5076,
-                    13676270.1798,  13817935.6272,  19036035.7712,  27172582.9298],
-    "연료전지용":   [19407276,      14839232.3865,  17590385.0715,  16706989.8312,
-                    16844042.7317,  17064584.9057,  16593745.1583,  16777239.1856,
-                    18032621.6369,  18415368.2804,  16902463.0004,  19498114.0156],
-    "열전용설비용": [787200,        879787.5300,    606910.0640,    1199348.1290,
-                    464678.8650,    537097.3200,    1060136.9850,   571528.0480,
-                    540267.2600,    502299.8500,    18025286.3000,  13448176.6320],
-    "주한미군":     [12186297,      10672541.8819,  6854857.0958,   2520799.6358,
-                    2226799.2964,   1870822.2538,   1625846.1678,   1585241.3217,
-                    1923349.8831,   2258927.1759,   5376100.8906,   9690043.6337],
-}
-
-_KOGAS_MONTHS = [f"2025-{m:02d}" for m in range(1, 13)]
-
-# 판매량(MJ) → GJ 변환 DataFrame (index=상품, columns=YYYY-MM)
-_KOGAS_SALES_DF = pd.DataFrame(
-    {p: [v / 1000.0 for v in vals] for p, vals in _KOGAS_SALES_MJ.items()},
-    index=_KOGAS_MONTHS
-).T
-_KOGAS_SALES_DF.index.name = "상품"
-
-# 판매량 월별 합계(GJ) — 구성비 분모
-_KOGAS_SALES_TOTAL_GJ = _KOGAS_SALES_DF.sum(axis=0)  # Series: index=YYYY-MM
-
-# 판매량 기준 구성비(비율, 0~1) — index=상품, columns=YYYY-MM
-_KOGAS_RATIO = _KOGAS_SALES_DF.div(_KOGAS_SALES_TOTAL_GJ)
-
-# KOGAS_GJ는 스프레드시트 총 공급량 로드 후 계산
-# = 판매량 구성비 × 스프레드시트 월별 총 공급량
-# (아래 데이터 로드 완료 후 build_kogas_gj() 호출로 설정)
-KOGAS_GJ = None  # placeholder
+# ── "가스공사 제출용 판매량(MJ)" 표 (KOGAS 비용정산 기준 판매량, MJ) ──
+# "상품별 분배" 표와 동일한 방식(제목 텍스트 탐색 + 상대 위치)으로 인식한다.
+# 시트 값 단위가 MJ이므로 GJ 환산 시 ÷1000 적용.
+KOGAS_TABLE_TITLE_VARIANTS = ["가스공사 제출용 판매량", "가스공사제출용판매량"]
+MJ_TO_GJ = 1000.0  # MJ → GJ 변환 (÷1000)
 
 # ──────────────────────────────────────────────
 # 데이터 로드
@@ -153,6 +92,50 @@ def _find_row_containing(raw, text_variants, search_cols=(0, 1, 2, 3)):
     return None
 
 
+def _extract_product_table(raw, title_variants, data_start_col=DATA_START_COL):
+    """
+    제목 텍스트를 시트에서 찾아 그 아래 표준 구조
+    (제목행 → 헤더행(날짜) → 주택용 N_HOUSING행 → 소계 → 기타 N_OTHER행 → 소계 → 합계)
+    를 상대 위치로 인식해 (dates_valid, df[상품 x 연월], error_msg, debug) 를 반환한다.
+    """
+    dbg = {}
+    title_idx = _find_row_containing(raw, title_variants)
+    dbg["title_idx_found"] = title_idx
+    if title_idx is None:
+        return None, None, f"'{title_variants[0]}' 표 제목을 시트에서 찾을 수 없습니다.", dbg
+
+    header_idx = title_idx + 1
+    housing_rows = [header_idx + i for i in range(1, N_HOUSING + 1)]
+    subtotal1_row = header_idx + N_HOUSING + 1
+    other_rows = [subtotal1_row + i for i in range(1, N_OTHER + 1)]
+    data_rows = housing_rows + other_rows
+    dbg["header_idx"] = header_idx
+    dbg["data_rows"] = data_rows
+
+    dates = pd.to_datetime(raw.iloc[header_idx, data_start_col:], errors="coerce")
+    valid_cols = [i for i, d in enumerate(dates) if pd.notna(d)]
+    dates_valid = dates.iloc[valid_cols]
+    dbg["n_valid_date_cols"] = len(valid_cols)
+    dbg["date_sample"] = [str(d) for d in dates_valid.iloc[:5]]
+
+    if len(valid_cols) == 0:
+        return None, None, (
+            f"'{title_variants[0]}' 헤더 행(0-idx {header_idx})에서 날짜를 하나도 인식하지 못했습니다."
+        ), dbg
+
+    result = {}
+    for idx, row_i in enumerate(data_rows):
+        if row_i >= len(raw): continue
+        product = PRODUCT_LIST[idx]
+        vals = pd.to_numeric(
+            raw.iloc[row_i, data_start_col:].iloc[valid_cols]
+            .astype(str).str.replace(",", ""), errors="coerce").values
+        result[product] = vals
+    df = pd.DataFrame(result, index=dates_valid).T
+    df.index.name = "상품"
+    return dates_valid, df, None, dbg
+
+
 @st.cache_data(ttl=1800)
 def load_new_gsheet():
     debug = {}
@@ -162,39 +145,17 @@ def load_new_gsheet():
         raw = pd.read_csv(StringIO(resp.text), header=None)
         debug["raw_shape"] = raw.shape
 
-        # ── "상품별 분배" 제목 행을 시트에서 직접 탐색 ──
-        title_idx = _find_row_containing(raw, SUPPLY_TABLE_TITLE_VARIANTS)
-        debug["title_idx_found"] = title_idx
-        if title_idx is None:
-            return None, None, None, None, (
-                "구글시트에서 '상품별 분배' 표 제목을 찾을 수 없습니다. "
-                "시트에 '상품별 분배(GJ)' 라는 텍스트가 남아있는지 확인해주세요."
-            ), debug
-
-        date_header_idx = title_idx + 1
-        housing_rows = [date_header_idx + i for i in range(1, N_HOUSING + 1)]
-        subtotal1_row = date_header_idx + N_HOUSING + 1
-        other_rows = [subtotal1_row + i for i in range(1, N_OTHER + 1)]
-        supply_data_rows = housing_rows + other_rows
-        debug["date_header_idx"] = date_header_idx
-        debug["supply_data_rows"] = supply_data_rows
-
-        # 상품별분배 날짜 헤더, D열(idx=3)부터
-        dates = pd.to_datetime(raw.iloc[date_header_idx, DATA_START_COL:], errors="coerce")
-        valid_cols = [i for i, d in enumerate(dates) if pd.notna(d)]
-        dates_valid = dates.iloc[valid_cols]
-        debug["n_valid_date_cols"] = len(valid_cols)
-        debug["date_sample"] = [str(d) for d in dates_valid.iloc[:5]]
-
-        if len(valid_cols) == 0:
-            return None, None, None, None, (
-                f"'상품별 분배' 헤더 행(0-idx {date_header_idx})에서 날짜를 하나도 인식하지 못했습니다. "
-                "헤더 행의 날짜 셀 형식을 확인해주세요."
-            ), debug
+        # ── "상품별 분배" 표 (재무팀 실측 상품별 공급량, GJ) ──
+        dates_valid, supply_df, err, sdbg = _extract_product_table(raw, SUPPLY_TABLE_TITLE_VARIANTS)
+        debug["supply_table"] = sdbg
+        if err:
+            return None, None, None, None, None, err, debug
 
         # 총 공급량(GJ): 행2(0-indexed=1), C열(idx=2)부터
         # 천연가스 공급량(GJ): 행4(0-indexed=3), C열(idx=2)부터 — BIO 제외 총량
         # 전체 코드에서 이 값을 총량 기준으로 통일 사용
+        valid_cols = [i for i, d in enumerate(
+            pd.to_datetime(raw.iloc[sdbg["header_idx"], DATA_START_COL:], errors="coerce")) if pd.notna(d)]
         natgas_raw = raw.iloc[NATGAS_ROW_IDX, TOTAL_START_COL:].reset_index(drop=True)
         natgas_vals = pd.to_numeric(
             natgas_raw.iloc[[v + 1 for v in valid_cols]]
@@ -205,21 +166,6 @@ def load_new_gsheet():
         # total_supply_df = 천연가스 공급량(행4) 기준으로 통일
         total_supply_df = natgas_supply_df.rename(columns={"천연가스공급량_GJ": "총공급량_GJ"})
 
-        def extract_rows(row_indices):
-            result = {}
-            for idx, row_i in enumerate(row_indices):
-                if row_i >= len(raw): continue
-                product = PRODUCT_LIST[idx]
-                vals = pd.to_numeric(
-                    raw.iloc[row_i, DATA_START_COL:].iloc[valid_cols]
-                    .astype(str).str.replace(",", ""), errors="coerce").values
-                result[product] = vals
-            df = pd.DataFrame(result, index=dates_valid).T
-            df.index.name = "상품"
-            return df
-
-        # 상품별 분배(GJ) — 재무팀이 입력한 상품별 공급량(실측, GJ 환산 완료)
-        supply_df = extract_rows(supply_data_rows)
         debug["supply_nonzero_cols"] = int((supply_df.sum(axis=0) > 0).sum())
 
         # 구성비(%) — 표시/참고용. 그 달 상품 합계 대비 비중.
@@ -232,10 +178,25 @@ def load_new_gsheet():
         debug["dates_min"] = str(dates_valid.min()) if len(dates_valid) else None
         debug["dates_max"] = str(dates_valid.max()) if len(dates_valid) else None
 
-        return total_supply_df, ratio_df, supply_df, dates_valid, None, debug
+        # ── "가스공사 제출용 판매량(MJ)" 표 (KOGAS 비용정산 기준 판매량) ──
+        kogas_dates, kogas_mj_df, kerr, kdbg = _extract_product_table(raw, KOGAS_TABLE_TITLE_VARIANTS)
+        debug["kogas_table"] = kdbg
+        if kerr or kogas_mj_df is None:
+            debug["kogas_error"] = kerr
+            kogas_ratio_df = None
+        else:
+            kogas_gj_df = kogas_mj_df / MJ_TO_GJ  # MJ → GJ
+            kogas_gj_df.columns = [c.strftime("%Y-%m") for c in kogas_gj_df.columns]
+            k_col_sum = kogas_gj_df.sum(axis=0)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                kogas_ratio_df = kogas_gj_df.div(k_col_sum.replace(0, np.nan), axis=1)  # 비율(0~1)
+            kogas_ratio_df = kogas_ratio_df.fillna(0.0)
+            debug["kogas_nonzero_cols"] = int((kogas_gj_df.sum(axis=0) > 0).sum())
+
+        return total_supply_df, ratio_df, supply_df, dates_valid, kogas_ratio_df, None, debug
     except Exception as e:
         debug["exception"] = str(e)
-        return None, None, None, None, str(e), debug
+        return None, None, None, None, None, str(e), debug
 
 OLD_COL_MAP = {
     "취사용":       ["취사용"],
@@ -312,6 +273,24 @@ def build_new_result(supply_df, ratio_df, y_start, y_end, natgas_series=None):
     df = pd.DataFrame(rows)
     if not df.empty:
         df["연도"] = df["연월"].dt.year
+    return df
+
+def scale_to_target_total(df_long: pd.DataFrame, target_series: pd.Series) -> pd.DataFrame:
+    """
+    df_long   : "연월","상품","공급량_GJ" 컬럼을 가진 long-format DataFrame (원본, 미보정)
+    target_series: index=Timestamp, 목표 총량(GJ) — 천연가스 공급량(행4, BIO 제외)
+
+    각 연월별 상품 공급량 합계를 target_series 값에 비례 보정하여
+    이전방식의 월별 총량이 '총공급량 − BIO가스'(천연가스 공급량)와 정확히 일치하도록 만든다.
+    target_series에 없는 연월은 원본값을 그대로 사용한다(보정 없음).
+    """
+    df = df_long.copy()
+    if df.empty:
+        return df
+    month_sum = df.groupby("연월")["공급량_GJ"].transform("sum")
+    target_vals = df["연월"].map(target_series)
+    scale = np.where((month_sum > 0) & target_vals.notna(), target_vals / month_sum, 1.0)
+    df["공급량_GJ"] = df["공급량_GJ"].astype(float) * scale
     return df
 
 # ──────────────────────────────────────────────
@@ -542,26 +521,25 @@ st.markdown("""
 <div class="info-box">
   <div class="info-row">
     <div><span class="badge-old">이전방식</span></div>
-    <div>총 공급량 = 상품별 공급량의 합산 &nbsp;|&nbsp; 상품별 공급량 비율 적용</div>
+    <div>천연가스 공급량(BIO제외) = 상품별 공급량 도출</div>
   </div>
   <div class="info-row">
     <div><span class="badge-new">신규방식</span></div>
-    <div>천연가스 공급량 = 총공급량 − BIO가스 &nbsp;|&nbsp; 재무팀 상품별 비율 적용</div>
+    <div>천연가스 공급량(BIO제외) = 재무팀 상품별 공급량 비율 적용</div>
   </div>
   <div class="info-row">
     <div><span class="badge-kogas">KOGAS 제출</span></div>
     <div>수급량 비용 정산시 사용하는 물량</div>
   </div>
   <div style="margin-top:6px; color:#888; font-size:0.85rem;">
-    ※ 세 방식은 상품별 비율 산출 기준이 달라 상품별 공급량이 다를 수 있습니다.
-    &nbsp;|&nbsp; 이전방식 총량은 GitHub 실적 파일의 상품별 합산값을, 신규방식/KOGAS 비교의 기준 총량은
-    구글시트 천연가스 공급량(행4, BIO 제외)을 사용합니다.
+    ※ 세 방식 모두 목표 총량은 <b>천연가스 공급량(BIO 제외, 구글시트 행4)</b>으로 동일하며,
+    상품별 배분 방법(비율 산출 기준)만 다릅니다.
   </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ── 데이터 로드
-total_supply_df, ratio_df, supply_df, dates, gs_err, gs_debug = load_new_gsheet()
+total_supply_df, ratio_df, supply_df, dates, kogas_ratio_df, gs_err, gs_debug = load_new_gsheet()
 
 with st.sidebar.expander("🔧 신규방식 로드 진단정보", expanded=bool(gs_err)):
     st.json(gs_debug)
@@ -575,8 +553,14 @@ st.sidebar.success("✅ 구글시트(신규방식) 로드 완료")
 if supply_df.sum(axis=0).sum() == 0:
     st.warning(
         "⚠️ '상품별 분배' 표 위치는 찾았지만 데이터 값이 모두 0으로 읽혔습니다. "
-        "사이드바의 '신규방식 로드 진단정보'를 열어 date_header_idx / supply_data_rows가 "
+        "사이드바의 '신규방식 로드 진단정보'를 열어 header_idx / data_rows가 "
         "실제 시트 행 번호와 맞는지 확인해주세요."
+    )
+
+if kogas_ratio_df is None:
+    st.sidebar.warning(
+        "⚠️ 'KOGAS 제출' 로드 실패: " + str(gs_debug.get("kogas_error", "")) +
+        " — 시트에 '가스공사 제출용 판매량(MJ)' 표 제목이 남아있는지 확인해주세요."
     )
 
 if uploaded_old is not None:
@@ -591,14 +575,17 @@ else:
         st.error(f"이전방식 파일 GitHub 로드 실패: {old_err}"); st.stop()
     st.sidebar.info("📡 이전방식 파일: GitHub 자동 사용")
 
-# 천연가스 공급량(행4) Series 생성 — 신규방식 보정용
+# 천연가스 공급량(행4, BIO 제외) Series 생성 — 이전/신규방식 공통 목표 총량
 _natgas_ts = total_supply_df.copy()
 _natgas_ts["연월"] = pd.to_datetime(_natgas_ts["연월"])
 _natgas_series_ts = _natgas_ts.set_index("연월")["총공급량_GJ"]
 
 new_result = build_new_result(supply_df, ratio_df, y_start, y_end, natgas_series=_natgas_series_ts)
-old_result = old_df[(old_df["연월"].dt.year >= y_start) &
-                    (old_df["연월"].dt.year <= y_end)].copy()
+
+old_result_raw = old_df[(old_df["연월"].dt.year >= y_start) &
+                        (old_df["연월"].dt.year <= y_end)].copy()
+# 이전방식 총량도 천연가스 공급량(행4, 총공급량−BIO가스)에 맞춰 비례 보정
+old_result = scale_to_target_total(old_result_raw, _natgas_series_ts)
 if not old_result.empty:
     old_result["연도"] = old_result["연월"].dt.year
 
@@ -609,17 +596,26 @@ total_filtered = total_supply_df[
 if new_result.empty:
     st.warning("선택 기간에 신규방식 데이터가 없습니다."); st.stop()
 
-# ── 천연가스 공급량(행4, BIO 제외) → 2025년 Series
-# total_supply_df가 이미 행4(천연가스) 기준으로 통일됨
+# ── 천연가스 공급량(행4, BIO 제외) — YYYY-MM 문자열 인덱스 Series
 _ng_df = total_supply_df.copy()
 _ng_df["연월_str"] = pd.to_datetime(_ng_df["연월"]).dt.strftime("%Y-%m")
 _ng_series = _ng_df.set_index("연월_str")["총공급량_GJ"]
+
+# KOGAS 제출 데이터가 있는 2025년 월 목록 (구글시트 '가스공사 제출용 판매량' 표에서 동적으로 추출)
+if kogas_ratio_df is not None and len(kogas_ratio_df.columns) > 0:
+    _KOGAS_MONTHS = sorted([c for c in kogas_ratio_df.columns if str(c).startswith("2025")])
+else:
+    _KOGAS_MONTHS = []
 
 # 2025년 천연가스 공급량 (BIO 제외 총량)
 _ss_natgas_2025 = _ng_series.reindex(_KOGAS_MONTHS, fill_value=0)
 
 # KOGAS_GJ = 판매량 구성비(비율) × 천연가스 공급량(BIO 제외)
-KOGAS_GJ = _KOGAS_RATIO.multiply(_ss_natgas_2025, axis=1)
+if kogas_ratio_df is not None and _KOGAS_MONTHS:
+    KOGAS_GJ = kogas_ratio_df.reindex(columns=_KOGAS_MONTHS, fill_value=0.0).multiply(_ss_natgas_2025, axis=1)
+else:
+    KOGAS_GJ = pd.DataFrame(0.0, index=PRODUCT_LIST, columns=_KOGAS_MONTHS)
+    KOGAS_GJ.index.name = "상품"
 
 # 전체 합계 카드: KOGAS 총량 = 천연가스 공급량(BIO 제외)
 _KOGAS_MONTHLY_TOTAL_GJ = _ss_natgas_2025
@@ -916,6 +912,13 @@ with tab3:
     &nbsp;|&nbsp; KOGAS 제출 물량은 2025년 1~12월 데이터만 제공됩니다.</span>
     <br>
     """, unsafe_allow_html=True)
+
+    if not _KOGAS_MONTHS:
+        st.warning(
+            "⚠️ 구글시트에서 '가스공사 제출용 판매량(MJ)' 표를 찾지 못해 KOGAS 제출 물량 비교를 표시할 수 없습니다. "
+            "시트에 해당 표가 있는지, 제목 텍스트가 남아있는지 확인해주세요."
+        )
+        st.stop()
 
     # ── 비교 방식 선택 (토글)
     compare_mode = st.radio(
