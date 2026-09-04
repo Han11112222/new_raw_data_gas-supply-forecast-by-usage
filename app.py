@@ -53,13 +53,15 @@ GROUP_SPANS = [
 TOTAL_ROW_IDX   = 1    # 행2(0-indexed=1): 총 공급량(GJ)
 NATGAS_ROW_IDX  = 3    # 행4(0-indexed=3): 천연가스 공급량(GJ) = BIO 제외 총량
 TOTAL_START_COL = 2    # 총공급량/천연가스 행은 C열(idx=2)부터 날짜 데이터
-DATE_HEADER_IDX = 25   # 행26(0-indexed=25): 상품별분배 날짜 헤더
-DATA_START_COL  = 3    # 구성비/분배 데이터 시작 열 (D열=3, A~C=0~2)
-# 구성비: 행5는 "구성비" 라벨, 행6~23까지 구성비 데이터
-# 이미지 기준(0-indexed): 구성비 헤더=행5, 데이터행=행6~19
-# 상품별분배: 헤더=행25, 데이터행=행26~39
-RATIO_DATA_ROWS  = [6, 7, 8, 9,   11, 12, 13, 14, 15, 16, 17, 18, 19]   # 구성비 데이터 행
-SUPPLY_DATA_ROWS = [26, 27, 28, 29, 31, 32, 33, 34, 35, 36, 37, 38, 39] # 상품별분배 데이터 행
+DATA_START_COL  = 3    # 상품별분배 데이터 시작 열 (D열=3, A~C=0~2)
+
+# ── "상품별 분배(GJ)" 표 (재무팀 실측 상품별 공급량, GJ 환산 완료) ──
+# 행 번호를 하드코딩하지 않고 "상품별 분배" 제목 텍스트를 시트에서 직접 찾아
+# 그 아래 구조(제목행 → 헤더행 → 주택용 4행 → 소계 → 기타 9행 → 소계 → 합계)를
+# 상대 위치로 인식한다. 시트 행 삽입/삭제에도 안전하게 동작하도록 하기 위함.
+SUPPLY_TABLE_TITLE_VARIANTS = ["상품별 분배", "상품별분배"]
+N_HOUSING = len(HOUSING_PRODUCTS)   # 4
+N_OTHER   = len(OTHER_PRODUCTS)     # 9
 
 SUBTOTAL_LABEL = "소 계"
 TOTAL_LABEL    = "합 계"
@@ -135,16 +137,59 @@ KOGAS_GJ = None  # placeholder
 # ──────────────────────────────────────────────
 # 데이터 로드
 # ──────────────────────────────────────────────
+def _find_row_containing(raw, text_variants, search_cols=(0, 1, 2, 3)):
+    """raw(DataFrame, header=None)에서 지정 텍스트가 포함된 첫 행의 0-index를 반환. 못 찾으면 None."""
+    max_col = min(raw.shape[1], max(search_cols) + 1)
+    for r in range(len(raw)):
+        for c in range(max_col):
+            val = raw.iat[r, c]
+            if pd.isna(val):
+                continue
+            val_str = str(val)
+            for t in text_variants:
+                if t in val_str:
+                    return r
+    return None
+
+
 @st.cache_data(ttl=1800)
 def load_new_gsheet():
+    debug = {}
     try:
         resp = requests.get(NEW_GSHEET_URL, timeout=20)
         resp.raise_for_status()
         raw = pd.read_csv(StringIO(resp.text), header=None)
-        # 상품별분배 날짜 헤더: 행26(0-indexed=25), D열(idx=3)부터
-        dates = pd.to_datetime(raw.iloc[DATE_HEADER_IDX, DATA_START_COL:], errors="coerce")
+        debug["raw_shape"] = raw.shape
+
+        # ── "상품별 분배" 제목 행을 시트에서 직접 탐색 ──
+        title_idx = _find_row_containing(raw, SUPPLY_TABLE_TITLE_VARIANTS)
+        debug["title_idx_found"] = title_idx
+        if title_idx is None:
+            return None, None, None, None, (
+                "구글시트에서 '상품별 분배' 표 제목을 찾을 수 없습니다. "
+                "시트에 '상품별 분배(GJ)' 라는 텍스트가 남아있는지 확인해주세요."
+            ), debug
+
+        date_header_idx = title_idx + 1
+        housing_rows = [date_header_idx + i for i in range(1, N_HOUSING + 1)]
+        subtotal1_row = date_header_idx + N_HOUSING + 1
+        other_rows = [subtotal1_row + i for i in range(1, N_OTHER + 1)]
+        supply_data_rows = housing_rows + other_rows
+        debug["date_header_idx"] = date_header_idx
+        debug["supply_data_rows"] = supply_data_rows
+
+        # 상품별분배 날짜 헤더, D열(idx=3)부터
+        dates = pd.to_datetime(raw.iloc[date_header_idx, DATA_START_COL:], errors="coerce")
         valid_cols = [i for i, d in enumerate(dates) if pd.notna(d)]
         dates_valid = dates.iloc[valid_cols]
+        debug["n_valid_date_cols"] = len(valid_cols)
+        debug["date_sample"] = [str(d) for d in dates_valid.iloc[:5]]
+
+        if len(valid_cols) == 0:
+            return None, None, None, None, (
+                f"'상품별 분배' 헤더 행(0-idx {date_header_idx})에서 날짜를 하나도 인식하지 못했습니다. "
+                "헤더 행의 날짜 셀 형식을 확인해주세요."
+            ), debug
 
         # 총 공급량(GJ): 행2(0-indexed=1), C열(idx=2)부터
         # 천연가스 공급량(GJ): 행4(0-indexed=3), C열(idx=2)부터 — BIO 제외 총량
@@ -172,11 +217,24 @@ def load_new_gsheet():
             df.index.name = "상품"
             return df
 
-        ratio_df  = extract_rows(RATIO_DATA_ROWS)
-        supply_df = extract_rows(SUPPLY_DATA_ROWS)
-        return total_supply_df, ratio_df, supply_df, dates_valid, None
+        # 상품별 분배(GJ) — 재무팀이 입력한 상품별 공급량(실측, GJ 환산 완료)
+        supply_df = extract_rows(supply_data_rows)
+        debug["supply_nonzero_cols"] = int((supply_df.sum(axis=0) > 0).sum())
+
+        # 구성비(%) — 표시/참고용. 그 달 상품 합계 대비 비중.
+        # (실제 신규방식 공급량 계산은 supply_df 원본값과 천연가스공급량(행4)의 비율로 산출되며,
+        #  이 ratio_df는 build_new_result 내부 계산에는 직접 쓰이지 않고 화면 표시용으로만 사용됨)
+        col_sum = supply_df.sum(axis=0)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            ratio_df = supply_df.div(col_sum.replace(0, np.nan), axis=1) * 100
+        ratio_df = ratio_df.fillna(0.0)
+        debug["dates_min"] = str(dates_valid.min()) if len(dates_valid) else None
+        debug["dates_max"] = str(dates_valid.max()) if len(dates_valid) else None
+
+        return total_supply_df, ratio_df, supply_df, dates_valid, None, debug
     except Exception as e:
-        return None, None, None, None, str(e)
+        debug["exception"] = str(e)
+        return None, None, None, None, str(e), debug
 
 OLD_COL_MAP = {
     "취사용":       ["취사용"],
@@ -220,8 +278,14 @@ def load_old_from_github():
 def build_new_result(supply_df, ratio_df, y_start, y_end, natgas_series=None):
     """
     신규방식 공급량 계산.
-    natgas_series: 천연가스 공급량(행4, BIO 제외) Series (index=Timestamp).
-                   제공 시 상품별분배값을 행4 기준으로 보정.
+
+    supply_df       : 재무팀이 입력한 상품별 공급량(실측, GJ) — "상품별 분배(GJ)" 표(D49:ZZ62)
+    natgas_series    : 천연가스 공급량(행4, BIO 제외) Series (index=Timestamp).
+                       상품별분배 합계(sub_sum, 즉 재무팀 "수급량" 기준 합)를
+                       천연가스공급량(행4, "수급량+기타량" 기준 총량)에 맞춰 비례 보정한다.
+                       즉, 최종값 = supply_df 원본값 × (천연가스공급량 ÷ 그 달 상품 합계)
+                                 = (원본값 ÷ 상품합계) × 천연가스공급량
+                                 = 재무팀 구성비 × 천연가스공급량(행4)
     """
     rows = []
     for col in supply_df.columns:
@@ -229,8 +293,6 @@ def build_new_result(supply_df, ratio_df, y_start, y_end, natgas_series=None):
         # 행4(천연가스) 보정 비율 계산
         if natgas_series is not None and col in natgas_series.index:
             ng_val = float(natgas_series[col])
-            col_str = col.strftime("%Y-%m") if hasattr(col, "strftime") else str(col)
-            # 상품별분배 합계 = 행2 총공급량 → 행4로 스케일 조정
             sub_sum = sum(
                 float(supply_df.loc[p, col]) for p in PRODUCT_LIST if p in supply_df.index
             )
@@ -244,7 +306,7 @@ def build_new_result(supply_df, ratio_df, y_start, y_end, natgas_series=None):
                 "연월": col, "상품": product,
                 "그룹": GROUP_MAP.get(product, "기타"),
                 "구성비(%)": float(ratio_df.loc[product, col]) if product in ratio_df.index else 0.0,
-                "공급량_GJ": raw_val * scale,  # 행4 기준으로 보정
+                "공급량_GJ": raw_val * scale,  # 행4(천연가스공급량) 기준으로 보정
             })
     df = pd.DataFrame(rows)
     if not df.empty:
@@ -438,7 +500,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("#### 📅 조회 기간")
     c1, c2 = st.columns(2)
-    y_start = c1.number_input("시작", 2014, 2030, 2017)
+    y_start = c1.number_input("시작", 2014, 2030, 2018)
     y_end   = c2.number_input("종료", 2014, 2030, 2025)
     st.markdown("---")
     st.markdown("#### 🔄 단위 변환")
@@ -483,7 +545,7 @@ st.markdown("""
   </div>
   <div class="info-row">
     <div><span class="badge-new">신규방식</span></div>
-    <div>총 공급량 = 상품별 공급량의 합산 &nbsp;|&nbsp; 가스공사 비용 정산 비율 반영</div>
+    <div>총 공급량 = 천연가스 공급량(행4) &nbsp;|&nbsp; 재무팀 상품별 실측 공급량 기준 구성비 반영</div>
   </div>
   <div style="margin-top:6px; color:#888; font-size:0.85rem;">
     ※ 이전방식과 신규방식은 상품별 비율 산출 기준이 달라 상품별 공급량이 다를 수 있습니다.
@@ -492,12 +554,23 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── 데이터 로드
-total_supply_df, ratio_df, supply_df, dates, gs_err = load_new_gsheet()
+total_supply_df, ratio_df, supply_df, dates, gs_err, gs_debug = load_new_gsheet()
+
+with st.sidebar.expander("🔧 신규방식 로드 진단정보", expanded=bool(gs_err)):
+    st.json(gs_debug)
+
 if gs_err or ratio_df is None:
     st.error(f"구글시트 로드 실패: {gs_err}")
     st.info("구글시트를 **링크가 있는 모든 사용자 → 뷰어** 로 공유 설정해 주세요.")
     st.stop()
 st.sidebar.success("✅ 구글시트(신규방식) 로드 완료")
+
+if supply_df.sum(axis=0).sum() == 0:
+    st.warning(
+        "⚠️ '상품별 분배' 표 위치는 찾았지만 데이터 값이 모두 0으로 읽혔습니다. "
+        "사이드바의 '신규방식 로드 진단정보'를 열어 date_header_idx / supply_data_rows가 "
+        "실제 시트 행 번호와 맞는지 확인해주세요."
+    )
 
 if uploaded_old is not None:
     try:
@@ -616,9 +689,10 @@ with tab0:
 with tab1:
     st.markdown("""
     <span class="badge-old">이전방식</span> 상품별 공급량 비율 적용 &nbsp;
-    <span class="badge-new">신규방식</span> 가스공사 비용 정산 비율 반영
+    <span class="badge-new">신규방식</span> 재무팀 실측 상품별 공급량 기준 구성비 반영
     <br><span style="color:#888; font-size:0.85rem; line-height:2.5;">
-    ※ 두 방식 모두 월별 총 공급량(구글시트 D2행)을 기준으로 상품별 배분합니다.</span>
+    ※ 신규방식은 천연가스 공급량(구글시트 행4)을 기준 총량으로, 재무팀 실측 상품별 공급량(D49:ZZ62)으로 산출한
+    구성비를 곱해 상품별로 배분합니다.</span>
     <br><br>
     """, unsafe_allow_html=True)
 
@@ -782,10 +856,12 @@ with tab2:
     sub1, sub2, sub3 = st.tabs([
         "📋 구성비 (신규방식)",
         "🗃️ 상품별 공급량 원본 (신규방식)",
-        "📅 월별 총 공급량 (구글시트 D2)",
+        "📅 월별 총 공급량 (구글시트 D4)",
     ])
     with sub1:
-        st.markdown('<div class="sub">구성비 (%) — 가스공사 비용 정산 비율</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub">구성비 (%) — 재무팀 실측 상품별 공급량 기준</div>', unsafe_allow_html=True)
+        st.caption("상품별 분배(GJ) 표(D49:ZZ62) 값을 그 달 상품 합계로 나눈 비율(%). "
+                   "신규방식 최종 공급량은 이 구성비 × 천연가스 공급량(행4)으로 산출됩니다.")
         disp_ratio = ratio_df.copy()
         disp_ratio = disp_ratio[[c for c in disp_ratio.columns if pd.notna(c) and y_start <= c.year <= y_end]]
         disp_ratio.columns = [c.strftime("%Y-%m") for c in disp_ratio.columns]
@@ -802,7 +878,7 @@ with tab2:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key="dl_ratio")
 
     with sub2:
-        st.markdown('<div class="sub">상품별 월별 공급량 (GJ) — 구글시트 원본</div>', unsafe_allow_html=True)
+        st.markdown('<div class="sub">상품별 월별 공급량 (GJ) — 구글시트 원본 (재무팀 실측)</div>', unsafe_allow_html=True)
         disp_sup = supply_df.copy()
         disp_sup = disp_sup[[c for c in disp_sup.columns if pd.notna(c) and y_start <= c.year <= y_end]]
         disp_sup.columns = [c.strftime("%Y-%m") for c in disp_sup.columns]
@@ -838,7 +914,7 @@ with tab2:
 with tab3:
     st.markdown("""
     <span class="badge-old">이전방식</span> 수송용 CNG만 적용 &nbsp;|&nbsp; BIO값을 제외한 총량 기준<br>
-    <span class="badge-new">신규방식</span> 가스공사 비용 정산 비율 반영 &nbsp;|&nbsp; BIO값을 제외한 총량 기준<br>
+    <span class="badge-new">신규방식</span> 재무팀 실측 상품별 공급량 기준 구성비 반영 &nbsp;|&nbsp; BIO값을 제외한 총량 기준<br>
     <span class="badge-kogas">KOGAS 제출</span> 판매량 기준 구성비 × BIO값을 제외한 총량
     <br><span style="color:#888; font-size:0.85rem; line-height:2.5;">
     ※ 세 방식 모두 <b>BIO가스를 제외한 천연가스 공급량(스프레드시트 행4)</b>을 비교 기준 총량으로 사용합니다.
