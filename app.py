@@ -179,21 +179,20 @@ def load_new_gsheet():
         debug["dates_max"] = str(dates_valid.max()) if len(dates_valid) else None
 
         # ── "가스공사 제출용 판매량(MJ)" 표 (KOGAS 비용정산 기준 판매량) ──
+        # 여기서 구성비로 변환하지 않고 원본 GJ 값을 그대로 반환한다.
+        # (구성비 방식으로 반환하면 합계가 항상 천연가스공급량과 동일해져,
+        #  '전체 합계량 비교' 카드에서 실제 D22:ZZ22 합계와의 차이를 볼 수 없게 됨)
         kogas_dates, kogas_mj_df, kerr, kdbg = _extract_product_table(raw, KOGAS_TABLE_TITLE_VARIANTS)
         debug["kogas_table"] = kdbg
         if kerr or kogas_mj_df is None:
             debug["kogas_error"] = kerr
-            kogas_ratio_df = None
+            kogas_gj_df = None
         else:
-            kogas_gj_df = kogas_mj_df / MJ_TO_GJ  # MJ → GJ
+            kogas_gj_df = kogas_mj_df / MJ_TO_GJ  # MJ → GJ (가스공사 제출용 판매량 원본값)
             kogas_gj_df.columns = [c.strftime("%Y-%m") for c in kogas_gj_df.columns]
-            k_col_sum = kogas_gj_df.sum(axis=0)
-            with np.errstate(divide="ignore", invalid="ignore"):
-                kogas_ratio_df = kogas_gj_df.div(k_col_sum.replace(0, np.nan), axis=1)  # 비율(0~1)
-            kogas_ratio_df = kogas_ratio_df.fillna(0.0)
             debug["kogas_nonzero_cols"] = int((kogas_gj_df.sum(axis=0) > 0).sum())
 
-        return total_supply_df, ratio_df, supply_df, dates_valid, kogas_ratio_df, None, debug
+        return total_supply_df, ratio_df, supply_df, dates_valid, kogas_gj_df, None, debug
     except Exception as e:
         debug["exception"] = str(e)
         return None, None, None, None, None, str(e), debug
@@ -539,7 +538,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ── 데이터 로드
-total_supply_df, ratio_df, supply_df, dates, kogas_ratio_df, gs_err, gs_debug = load_new_gsheet()
+total_supply_df, ratio_df, supply_df, dates, kogas_gj_df, gs_err, gs_debug = load_new_gsheet()
 
 with st.sidebar.expander("🔧 신규방식 로드 진단정보", expanded=bool(gs_err)):
     st.json(gs_debug)
@@ -557,7 +556,7 @@ if supply_df.sum(axis=0).sum() == 0:
         "실제 시트 행 번호와 맞는지 확인해주세요."
     )
 
-if kogas_ratio_df is None:
+if kogas_gj_df is None:
     st.sidebar.warning(
         "⚠️ 'KOGAS 제출' 로드 실패: " + str(gs_debug.get("kogas_error", "")) +
         " — 시트에 '가스공사 제출용 판매량(MJ)' 표 제목이 남아있는지 확인해주세요."
@@ -602,23 +601,32 @@ _ng_df["연월_str"] = pd.to_datetime(_ng_df["연월"]).dt.strftime("%Y-%m")
 _ng_series = _ng_df.set_index("연월_str")["총공급량_GJ"]
 
 # KOGAS 제출 데이터가 있는 2025년 월 목록 (구글시트 '가스공사 제출용 판매량' 표에서 동적으로 추출)
-if kogas_ratio_df is not None and len(kogas_ratio_df.columns) > 0:
-    _KOGAS_MONTHS = sorted([c for c in kogas_ratio_df.columns if str(c).startswith("2025")])
+if kogas_gj_df is not None and len(kogas_gj_df.columns) > 0:
+    _KOGAS_MONTHS = sorted([c for c in kogas_gj_df.columns if str(c).startswith("2025")])
 else:
     _KOGAS_MONTHS = []
 
 # 2025년 천연가스 공급량 (BIO 제외 총량)
 _ss_natgas_2025 = _ng_series.reindex(_KOGAS_MONTHS, fill_value=0)
 
-# KOGAS_GJ = 판매량 구성비(비율) × 천연가스 공급량(BIO 제외)
-if kogas_ratio_df is not None and _KOGAS_MONTHS:
-    KOGAS_GJ = kogas_ratio_df.reindex(columns=_KOGAS_MONTHS, fill_value=0.0).multiply(_ss_natgas_2025, axis=1)
+# ── KOGAS 제출 "실제" 총량 (D22:ZZ22 합계, MJ→GJ 환산값 그대로) ──
+# '전체 합계량 비교' 카드는 이 실제 신고 합계를 사용한다 (natgas 총량과는 별개의 값).
+if kogas_gj_df is not None and _KOGAS_MONTHS:
+    _KOGAS_MONTHLY_TOTAL_GJ = kogas_gj_df.reindex(columns=_KOGAS_MONTHS, fill_value=0.0).sum(axis=0)
+else:
+    _KOGAS_MONTHLY_TOTAL_GJ = pd.Series(0.0, index=_KOGAS_MONTHS)
+
+# ── 상품별 상세비교/연간비교용 KOGAS_GJ = KOGAS 판매량 구성비 × 천연가스 공급량(행4) ──
+# (KOGAS 자체 총량과 천연가스공급량 총량은 서로 다른 개념이라, 상품별 배분 비교 시에는
+#  KOGAS의 '구성비'만 가져와 천연가스공급량 기준으로 재배분한 값을 사용한다.)
+if kogas_gj_df is not None and _KOGAS_MONTHS:
+    _kogas_gj_2025 = kogas_gj_df.reindex(columns=_KOGAS_MONTHS, fill_value=0.0)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        kogas_ratio_df = _kogas_gj_2025.div(_KOGAS_MONTHLY_TOTAL_GJ.replace(0, np.nan), axis=1).fillna(0.0)
+    KOGAS_GJ = kogas_ratio_df.multiply(_ss_natgas_2025, axis=1)
 else:
     KOGAS_GJ = pd.DataFrame(0.0, index=PRODUCT_LIST, columns=_KOGAS_MONTHS)
     KOGAS_GJ.index.name = "상품"
-
-# 전체 합계 카드: KOGAS 총량 = 천연가스 공급량(BIO 제외)
-_KOGAS_MONTHLY_TOTAL_GJ = _ss_natgas_2025
 
 # 신규방식 총량도 천연가스 공급량(행4) 사용 — 2025년 비교용
 _SS_NEW_TOTAL_2025 = _ss_natgas_2025
