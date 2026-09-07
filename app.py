@@ -427,6 +427,9 @@ st.markdown("""
     ※ 세 방식 모두 목표 총량은 <b>천연가스 공급량(BIO 제외, 구글시트 행4)</b>으로 동일하며,
     상품별 배분 방법(비율 산출 기준)만 다릅니다.
   </div>
+  <div style="margin-top:8px; font-size:0.85rem;">
+    📎 <a href="https://docs.google.com/spreadsheets/d/1gIhArPlLBJ9fwlaqXtZWxiKlSK9hbRuz6HcDw_Yf7Is/edit?pli=1&gid=0#gid=0" target="_blank" style="color:#2c5f8a;">데이터 원본 스프레드시트 열기</a>
+  </div>
 </div>
 """, unsafe_allow_html=True)
 # ── 데이터 로드 (구글시트 1개에서 3개 테이블 모두 로드)
