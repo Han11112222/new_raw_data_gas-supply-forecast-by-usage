@@ -461,7 +461,7 @@ _natgas_series_ts = _natgas_ts.set_index("연월")["총공급량_GJ"]
 new_result = build_new_result(supply_df, ratio_df, y_start, y_end, natgas_series=_natgas_series_ts)
 # ── 이전방식 결과 (같은 구글시트, 다른 행 범위)
 if old_supply_df is not None and old_ratio_df is not None:
-    old_result = build_new_result(old_supply_df, old_ratio_df, y_start, y_end, natgas_series=_natgas_series_ts)
+    old_result = build_new_result(old_supply_df, old_ratio_df, y_start, y_end, natgas_series=None)
 else:
     old_result = pd.DataFrame(columns=["연월", "상품", "그룹", "구성비(%)", "공급량_GJ", "연도"])
 total_filtered = total_supply_df[
