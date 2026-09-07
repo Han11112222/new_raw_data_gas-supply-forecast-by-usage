@@ -598,18 +598,18 @@ with tab1:
         ca1.markdown(f"""<div style="background:#f4f8fc; border-left:4px solid #2c5f8a;
             padding:0.8rem 1.2rem; border-radius:4px;">
             <div style="font-size:0.8rem; color:#666;">이전방식 2025년 전체 합계</div>
-            <div style="font-size:1.3rem; font-weight:700; color:#2c5f8a;">{gj_to_unit(old_total_2025):,.1f} {_ul}</div>
+            <div style="font-size:1.3rem; font-weight:700; color:#2c5f8a;">{gj_to_unit(old_total_2025):,.0f} {_ul}</div>
         </div>""", unsafe_allow_html=True)
         cb1.markdown(f"""<div style="background:#fff4f0; border-left:4px solid #e8501a;
             padding:0.8rem 1.2rem; border-radius:4px;">
             <div style="font-size:0.8rem; color:#666;">신규방식 2025년 전체 합계</div>
-            <div style="font-size:1.3rem; font-weight:700; color:#e8501a;">{gj_to_unit(new_total_2025):,.1f} {_ul}</div>
+            <div style="font-size:1.3rem; font-weight:700; color:#e8501a;">{gj_to_unit(new_total_2025):,.0f} {_ul}</div>
         </div>""", unsafe_allow_html=True)
         cc1.markdown(f"""<div style="background:#f9f9f9; border-left:4px solid {card_ct1};
             padding:0.8rem 1.2rem; border-radius:4px;">
             <div style="font-size:0.8rem; color:#666;">연간 차이 (신규 − 이전)</div>
             <div style="font-size:1.5rem; font-weight:800; color:{card_ct1};">{sign_t1}{total_pct_t1:.2f}%</div>
-            <div style="font-size:0.8rem; color:#888;">{sign_t1}{gj_to_unit(total_diff_t1):,.1f} {_ul}</div>
+            <div style="font-size:0.8rem; color:#888;">{sign_t1}{gj_to_unit(total_diff_t1):,.0f} {_ul}</div>
         </div>""", unsafe_allow_html=True)
         st.markdown("---")
         selected_product = st.selectbox(
@@ -630,9 +630,9 @@ with tab1:
         max_val = max(max(old_vals, default=1), max(new_vals, default=1))
         fig_cmp_yr = go.Figure()
         fig_cmp_yr.add_trace(go.Bar(x=[str(y) for y in years_p], y=old_vals, name="이전방식", marker_color="#2c5f8a",
-            hovertemplate=f"이전방식<br>%{{x}}년<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+            hovertemplate=f"이전방식<br>%{{x}}년<br>%{{y:,.0f}} {_ul}<extra></extra>"))
         fig_cmp_yr.add_trace(go.Bar(x=[str(y) for y in years_p], y=new_vals, name="신규방식", marker_color="#e8501a",
-            hovertemplate=f"신규방식<br>%{{x}}년<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+            hovertemplate=f"신규방식<br>%{{x}}년<br>%{{y:,.0f}} {_ul}<extra></extra>"))
         annotations = []
         for y, pct, nv in zip(years_p, pct_list, new_vals):
             sign  = "+" if pct >= 0 else ""
@@ -651,10 +651,10 @@ with tab1:
         fig_cmp_mo = go.Figure()
         fig_cmp_mo.add_trace(go.Scatter(x=old_prod_disp.index, y=old_prod_disp.values, name="이전방식",
             mode="lines", line=dict(color="#2c5f8a", width=2),
-            hovertemplate=f"이전방식<br>%{{x|%Y-%m}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+            hovertemplate=f"이전방식<br>%{{x|%Y-%m}}<br>%{{y:,.0f}} {_ul}<extra></extra>"))
         fig_cmp_mo.add_trace(go.Scatter(x=new_prod_disp.index, y=new_prod_disp.values, name="신규방식",
             mode="lines", line=dict(color="#e8501a", width=2, dash="dot"),
-            hovertemplate=f"신규방식<br>%{{x|%Y-%m}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+            hovertemplate=f"신규방식<br>%{{x|%Y-%m}}<br>%{{y:,.0f}} {_ul}<extra></extra>"))
         fig_cmp_mo.update_layout(height=400, xaxis_title="연월", yaxis_title=f"공급량 ({_ul})",
             legend=dict(orientation="h", yanchor="bottom", y=1.02),
             plot_bgcolor="white", paper_bgcolor="white", margin=dict(l=70,r=20,t=50,b=40), dragmode="pan")
@@ -683,16 +683,16 @@ with tab1:
             <div style="display:flex; gap:1rem; margin-bottom:1rem;">
                 <div style="flex:1; background:#f4f8fc; border-left:4px solid #2c5f8a; padding:0.8rem 1.2rem; border-radius:4px;">
                     <div style="font-size:0.8rem; color:#666;">이전방식 ({sel_year}년 합계)</div>
-                    <div style="font-size:1.3rem; font-weight:700; color:#2c5f8a;">{old_yr_total_disp:,.1f} {_ul}</div>
+                    <div style="font-size:1.3rem; font-weight:700; color:#2c5f8a;">{old_yr_total_disp:,.0f} {_ul}</div>
                 </div>
                 <div style="flex:1; background:#fff4f0; border-left:4px solid #e8501a; padding:0.8rem 1.2rem; border-radius:4px;">
                     <div style="font-size:0.8rem; color:#666;">신규방식 ({sel_year}년 합계)</div>
-                    <div style="font-size:1.3rem; font-weight:700; color:#e8501a;">{new_yr_total_disp:,.1f} {_ul}</div>
+                    <div style="font-size:1.3rem; font-weight:700; color:#e8501a;">{new_yr_total_disp:,.0f} {_ul}</div>
                 </div>
                 <div style="flex:1; background:#f9f9f9; border-left:4px solid {pct_col}; padding:0.8rem 1.2rem; border-radius:4px;">
                     <div style="font-size:0.8rem; color:#666;">{sel_year}년 전체 차이</div>
                     <div style="font-size:1.5rem; font-weight:800; color:{pct_col};">{sign_yr}{yr_pct:.2f}%</div>
-                    <div style="font-size:0.8rem; color:#888;">{sign_yr}{yr_diff_d:,.1f} {_ul}</div>
+                    <div style="font-size:0.8rem; color:#888;">{sign_yr}{yr_diff_d:,.0f} {_ul}</div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -709,9 +709,9 @@ with tab1:
             max_mo = max(max(old_mo_vals, default=1), max(new_mo_vals, default=1))
             fig_mo_yr = go.Figure()
             fig_mo_yr.add_trace(go.Bar(x=MONTH_KR, y=old_mo_vals, name="이전방식", marker_color="#2c5f8a",
-                hovertemplate=f"이전방식<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+                hovertemplate=f"이전방식<br>%{{x}}<br>%{{y:,.0f}} {_ul}<extra></extra>"))
             fig_mo_yr.add_trace(go.Bar(x=MONTH_KR, y=new_mo_vals, name="신규방식", marker_color="#e8501a",
-                hovertemplate=f"신규방식<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+                hovertemplate=f"신규방식<br>%{{x}}<br>%{{y:,.0f}} {_ul}<extra></extra>"))
             mo_ann = []
             min_mo_label_y = max_mo * 0.12
             for m, pct, ov, nv in zip(MONTH_KR, mo_pct, old_mo_vals, new_mo_vals):
@@ -738,7 +738,7 @@ with tab1:
                 "차이(%)": (sum(new_mo_gj)-sum(old_mo_gj))/sum(old_mo_gj)*100 if sum(old_mo_gj) else 0.0,
             }])
             tbl_mo_full = pd.concat([tbl_mo_yr, subtotal_mo], ignore_index=True)
-            fmt_dict = {col_name:"{:,.1f}", col_name2:"{:,.1f}", f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}
+            fmt_dict = {col_name:"{:,.0f}", col_name2:"{:,.0f}", f"차이_{_ul}":"{:,.0f}", "차이(%)":"{:+.2f}%"}
             st.dataframe(tbl_mo_full.style.format(fmt_dict).apply(style_subtotal_any, axis=None)
                 .map(color_pct, subset=["차이(%)"]), use_container_width=True, hide_index=True)
         st.markdown(f'<div class="sub">📋 연도별 비교 테이블 — {selected_product}</div>', unsafe_allow_html=True)
@@ -748,8 +748,8 @@ with tab1:
         tbl_cmp[f"차이_{_ul}"] = (tbl_cmp[col_n] - tbl_cmp[col_o]).round(1)
         tbl_cmp["차이(%)"] = ((new_yr_p - old_yr_p).fillna(0) / old_yr_p.replace(0, float("nan")) * 100).round(2)
         tbl_cmp.index.name = "연도"
-        st.dataframe(tbl_cmp.style.format({col_o:"{:,.1f}", col_n:"{:,.1f}",
-            f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}).map(color_pct, subset=["차이(%)"]),
+        st.dataframe(tbl_cmp.style.format({col_o:"{:,.0f}", col_n:"{:,.0f}",
+            f"차이_{_ul}":"{:,.0f}", "차이(%)":"{:+.2f}%"}).map(color_pct, subset=["차이(%)"]),
             use_container_width=True)
         buf_cmp = BytesIO()
         with pd.ExcelWriter(buf_cmp, engine="openpyxl") as w:
@@ -821,18 +821,18 @@ with tab2:
     ca.markdown(f"""<div style="background:#f4f8fc; border-left:4px solid {_color_all};
         padding:0.8rem 1.2rem; border-radius:4px;">
         <div style="font-size:0.8rem; color:#666;">{_badge_all} {sel_kogas_year}년 전체 합계</div>
-        <div style="font-size:1.3rem; font-weight:700; color:{_color_all};">{gj_to_unit(ratio_total_ann):,.1f} {_ul}</div>
+        <div style="font-size:1.3rem; font-weight:700; color:{_color_all};">{gj_to_unit(ratio_total_ann):,.0f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
     cb.markdown(f"""<div style="background:#e8f7fa; border-left:4px solid #0097b2;
         padding:0.8rem 1.2rem; border-radius:4px;">
         <div style="font-size:0.8rem; color:#666;">KOGAS 제출 {sel_kogas_year}년 전체 합계</div>
-        <div style="font-size:1.3rem; font-weight:700; color:#0097b2;">{gj_to_unit(kogas_total_ann):,.1f} {_ul}</div>
+        <div style="font-size:1.3rem; font-weight:700; color:#0097b2;">{gj_to_unit(kogas_total_ann):,.0f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
     cc.markdown(f"""<div style="background:#f9f9f9; border-left:4px solid {card_ct};
         padding:0.8rem 1.2rem; border-radius:4px;">
         <div style="font-size:0.8rem; color:#666;">연간 차이 ({_badge_all} − KOGAS)</div>
         <div style="font-size:1.5rem; font-weight:800; color:{card_ct};">{sign_t}{total_pct:.2f}%</div>
-        <div style="font-size:0.8rem; color:#888;">{sign_t}{gj_to_unit(total_diff_gj):,.1f} {_ul}</div>
+        <div style="font-size:0.8rem; color:#888;">{sign_t}{gj_to_unit(total_diff_gj):,.0f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
     st.markdown("---")
     # ── 상품별 상세 비교
@@ -877,18 +877,18 @@ with tab2:
     c1.markdown(f"""<div style="background:#f4f8fc; border-left:4px solid {bar_color};
         padding:0.8rem 1.2rem; border-radius:4px;">
         <div style="font-size:0.8rem; color:#666;">{badge_label} {sel_kogas_year}년 합계</div>
-        <div style="font-size:1.3rem; font-weight:700; color:{bar_color};">{gj_to_unit(ratio_annual):,.1f} {_ul}</div>
+        <div style="font-size:1.3rem; font-weight:700; color:{bar_color};">{gj_to_unit(ratio_annual):,.0f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
     c2.markdown(f"""<div style="background:#e8f7fa; border-left:4px solid #0097b2;
         padding:0.8rem 1.2rem; border-radius:4px;">
         <div style="font-size:0.8rem; color:#666;">KOGAS 제출 {sel_kogas_year}년 합계</div>
-        <div style="font-size:1.3rem; font-weight:700; color:#0097b2;">{gj_to_unit(kogas_annual):,.1f} {_ul}</div>
+        <div style="font-size:1.3rem; font-weight:700; color:#0097b2;">{gj_to_unit(kogas_annual):,.0f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
     c3.markdown(f"""<div style="background:#f9f9f9; border-left:4px solid {card_c};
         padding:0.8rem 1.2rem; border-radius:4px;">
         <div style="font-size:0.8rem; color:#666;">연간 차이 ({badge_label} − KOGAS)</div>
         <div style="font-size:1.5rem; font-weight:800; color:{card_c};">{sign_a}{annual_pct:.2f}%</div>
-        <div style="font-size:0.8rem; color:#888;">{sign_a}{gj_to_unit(annual_diff_gj):,.1f} {_ul}</div>
+        <div style="font-size:0.8rem; color:#888;">{sign_a}{gj_to_unit(annual_diff_gj):,.0f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     # ── 월별 막대 비교 차트
@@ -896,9 +896,9 @@ with tab2:
     max_k = max(max(ratio_vals, default=1), max(kogas_vals, default=1))
     fig_k = go.Figure()
     fig_k.add_trace(go.Bar(x=MONTH_KR, y=ratio_vals, name=badge_label, marker_color=bar_color,
-        hovertemplate=f"{badge_label}<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+        hovertemplate=f"{badge_label}<br>%{{x}}<br>%{{y:,.0f}} {_ul}<extra></extra>"))
     fig_k.add_trace(go.Bar(x=MONTH_KR, y=kogas_vals, name="KOGAS 제출", marker_color="#0097b2",
-        hovertemplate=f"KOGAS 제출<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+        hovertemplate=f"KOGAS 제출<br>%{{x}}<br>%{{y:,.0f}} {_ul}<extra></extra>"))
     k_ann = []
     min_label_y = max_k * 0.12  # 라벨이 너무 아래로 내려가지 않도록 최소 높이 보장
     for m, pct, rv, kv in zip(MONTH_KR, mo_pct_k, ratio_vals, kogas_vals):
@@ -921,10 +921,10 @@ with tab2:
     fig_k_line = go.Figure()
     fig_k_line.add_trace(go.Scatter(x=MONTH_KR, y=ratio_vals, name=badge_label,
         mode="lines+markers", line=dict(color=bar_color, width=2),
-        hovertemplate=f"{badge_label}<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+        hovertemplate=f"{badge_label}<br>%{{x}}<br>%{{y:,.0f}} {_ul}<extra></extra>"))
     fig_k_line.add_trace(go.Scatter(x=MONTH_KR, y=kogas_vals, name="KOGAS 제출",
         mode="lines+markers", line=dict(color="#0097b2", width=2, dash="dot"),
-        hovertemplate=f"KOGAS 제출<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
+        hovertemplate=f"KOGAS 제출<br>%{{x}}<br>%{{y:,.0f}} {_ul}<extra></extra>"))
     fig_k_line.update_layout(height=380, xaxis_title="월", yaxis_title=f"공급량 ({_ul})",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         plot_bgcolor="white", paper_bgcolor="white",
@@ -954,7 +954,7 @@ with tab2:
                         if sum(kogas_vals_gj) else 0.0,
     }])
     tbl_k_full = pd.concat([tbl_k, sub_k], ignore_index=True)
-    fmt_k = {col_r:"{:,.1f}", col_kg:"{:,.1f}", f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}
+    fmt_k = {col_r:"{:,.0f}", col_kg:"{:,.0f}", f"차이_{_ul}":"{:,.0f}", "차이(%)":"{:+.2f}%"}
     st.dataframe(tbl_k_full.style.format(fmt_k).apply(style_subtotal_any, axis=None)
         .map(color_pct, subset=["차이(%)"]), use_container_width=True, hide_index=True)
     st.markdown("<br>", unsafe_allow_html=True)
@@ -989,7 +989,7 @@ with tab2:
     def _pct_color(v):
         return "#c0390b" if v >= 0 else "#1a4f8a"
     def _fmt_num(v):
-        return f"{gj_to_unit(v):,.1f}"
+        return f"{gj_to_unit(v):,.0f}"
     def _fmt_pct(v):
         sign = "+" if v >= 0 else ""
         return f'<span style="color:{_pct_color(v)}; font-weight:600;">{sign}{v:.2f}%</span>'
