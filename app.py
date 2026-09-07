@@ -673,18 +673,16 @@ with tab1:
             col_name  = f"이전방식_{_ul}"
             col_name2 = f"신규방식_{_ul}"
             diff_vals = [n-o for o,n in zip(old_mo_vals, new_mo_vals)]
-            tbl_mo_yr = pd.DataFrame({col_name: old_mo_vals, col_name2: new_mo_vals,
-                f"차이_{_ul}": diff_vals, "차이(%)": mo_pct}, index=MONTH_KR)
-            tbl_mo_yr.index.name = "월"
-            subtotal_mo = pd.DataFrame([{col_name: sum(old_mo_vals), col_name2: sum(new_mo_vals),
+            tbl_mo_yr = pd.DataFrame({"월": MONTH_KR, col_name: old_mo_vals, col_name2: new_mo_vals,
+                f"차이_{_ul}": diff_vals, "차이(%)": mo_pct})
+            subtotal_mo = pd.DataFrame([{"월": SUBTOTAL_LABEL, col_name: sum(old_mo_vals), col_name2: sum(new_mo_vals),
                 f"차이_{_ul}": sum(diff_vals),
                 "차이(%)": (sum(new_mo_gj)-sum(old_mo_gj))/sum(old_mo_gj)*100 if sum(old_mo_gj) else 0.0,
-            }], index=[SUBTOTAL_LABEL])
-            subtotal_mo.index.name = "월"
-            tbl_mo_full = pd.concat([tbl_mo_yr, subtotal_mo])
+            }])
+            tbl_mo_full = pd.concat([tbl_mo_yr, subtotal_mo], ignore_index=True)
             fmt_dict = {col_name:"{:,.1f}", col_name2:"{:,.1f}", f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}
-            st.dataframe(tbl_mo_full.style.format(fmt_dict).apply(style_subtotal_any, axis=None)
-                .map(color_pct, subset=["차이(%)"]), use_container_width=True)
+            st.dataframe(tbl_mo_full.style.format(fmt_dict)
+                .map(color_pct, subset=["차이(%)"]), use_container_width=True, hide_index=True)
         st.markdown(f'<div class="sub">📋 연도별 비교 테이블 — {selected_product}</div>', unsafe_allow_html=True)
         col_o = f"이전방식_{_ul}"
         col_n = f"신규방식_{_ul}"
@@ -877,20 +875,19 @@ with tab2:
         col_kg:          kogas_vals,
         f"차이_{_ul}":   diff_vals,
         "차이(%)":       mo_pct_k,
-    }, index=MONTH_KR)
-    tbl_k.index.name = "월"
-    sub_k = pd.DataFrame([{
+    })
+    tbl_k.insert(0, "월", MONTH_KR)
+    sub_k = pd.DataFrame([{"월": SUBTOTAL_LABEL,
         col_r:          sum(ratio_vals),
         col_kg:         sum(kogas_vals),
         f"차이_{_ul}":  sum(diff_vals),
         "차이(%)":      (sum(ratio_vals_gj) - sum(kogas_vals_gj)) / sum(kogas_vals_gj) * 100
                         if sum(kogas_vals_gj) else 0.0,
-    }], index=[SUBTOTAL_LABEL])
-    sub_k.index.name = "월"
-    tbl_k_full = pd.concat([tbl_k, sub_k])
+    }])
+    tbl_k_full = pd.concat([tbl_k, sub_k], ignore_index=True)
     fmt_k = {col_r:"{:,.1f}", col_kg:"{:,.1f}", f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}
-    st.dataframe(tbl_k_full.style.format(fmt_k).apply(style_subtotal_any, axis=None)
-        .map(color_pct, subset=["차이(%)"]), use_container_width=True)
+    st.dataframe(tbl_k_full.style.format(fmt_k)
+        .map(color_pct, subset=["차이(%)"]), use_container_width=True, hide_index=True)
     st.markdown("<br>", unsafe_allow_html=True)
     # ── 전체 상품 연간 비교 테이블 (정산그룹 병합 구조 — HTML rowspan)
     st.markdown('<div class="sub">📋 전체 상품 연간 비교 — 2025년 합계</div>', unsafe_allow_html=True)
