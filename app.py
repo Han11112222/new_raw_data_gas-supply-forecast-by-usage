@@ -513,12 +513,9 @@ if kogas_gj_df is not None and _KOGAS_MONTHS:
     _KOGAS_MONTHLY_TOTAL_GJ = kogas_gj_df.reindex(columns=_KOGAS_MONTHS, fill_value=0.0).sum(axis=0)
 else:
     _KOGAS_MONTHLY_TOTAL_GJ = pd.Series(0.0, index=_KOGAS_MONTHS)
-# KOGAS_GJ = KOGAS 판매량 구성비 × 천연가스 공급량(행4)
+# KOGAS_GJ = 스프레드시트 MJ값 ÷ 1000 (원본 그대로, 스케일링 없음)
 if kogas_gj_df is not None and _KOGAS_MONTHS:
-    _kogas_gj_2025 = kogas_gj_df.reindex(columns=_KOGAS_MONTHS, fill_value=0.0)
-    with np.errstate(divide="ignore", invalid="ignore"):
-        kogas_ratio_df = _kogas_gj_2025.div(_KOGAS_MONTHLY_TOTAL_GJ.replace(0, np.nan), axis=1).fillna(0.0)
-    KOGAS_GJ = kogas_ratio_df.multiply(_ss_natgas_2025, axis=1)
+    KOGAS_GJ = kogas_gj_df.reindex(columns=_KOGAS_MONTHS, fill_value=0.0)
 else:
     KOGAS_GJ = pd.DataFrame(0.0, index=PRODUCT_LIST, columns=_KOGAS_MONTHS)
     KOGAS_GJ.index.name = "상품"
