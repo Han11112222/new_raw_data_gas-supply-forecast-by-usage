@@ -359,9 +359,16 @@ def color_pct(val):
     if pd.isna(val): return ""
     return "color:#e8501a;" if val >= 0 else "color:#2c5f8a;"
 def style_subtotal_any(df):
+    """소계 행에 배경색 적용 (인덱스 또는 '월' 컬럼 기준)."""
     styles = pd.DataFrame("", index=df.index, columns=df.columns)
+    # 인덱스에 소계가 있는 경우
     if SUBTOTAL_LABEL in df.index:
         styles.loc[SUBTOTAL_LABEL] = SUBTOTAL_STYLE
+    # '월' 컬럼에 소계가 있는 경우 (hide_index=True 테이블용)
+    elif "월" in df.columns:
+        mask = df["월"] == SUBTOTAL_LABEL
+        for idx in df.index[mask]:
+            styles.loc[idx] = SUBTOTAL_STYLE
     return styles
 # ──────────────────────────────────────────────
 # 사이드바
@@ -557,6 +564,33 @@ with tab1:
     if old_result.empty:
         st.warning("이전방식 데이터가 로드되지 않아 상세 비교를 표시할 수 없습니다.")
     else:
+        # ── 전체 합계량 비교 카드 (모든 상품 합산, 2025년)
+        _ul = unit_label()
+        old_total_2025 = old_result[old_result["연월"].dt.year == 2025]["공급량_GJ"].sum() if not old_result.empty else 0
+        new_total_2025 = new_result[new_result["연월"].dt.year == 2025]["공급량_GJ"].sum()
+        total_diff_t1  = new_total_2025 - old_total_2025
+        total_pct_t1   = total_diff_t1 / old_total_2025 * 100 if old_total_2025 else 0
+        sign_t1        = "+" if total_pct_t1 >= 0 else ""
+        card_ct1       = "#e8501a" if total_pct_t1 >= 0 else "#2c5f8a"
+        st.markdown('<div class="sub">📊 전체 합계량 비교 — 2025년 (모든 상품 합산)</div>', unsafe_allow_html=True)
+        ca1, cb1, cc1 = st.columns(3)
+        ca1.markdown(f"""<div style="background:#f4f8fc; border-left:4px solid #2c5f8a;
+            padding:0.8rem 1.2rem; border-radius:4px;">
+            <div style="font-size:0.8rem; color:#666;">이전방식 2025년 전체 합계</div>
+            <div style="font-size:1.3rem; font-weight:700; color:#2c5f8a;">{gj_to_unit(old_total_2025):,.1f} {_ul}</div>
+        </div>""", unsafe_allow_html=True)
+        cb1.markdown(f"""<div style="background:#fff4f0; border-left:4px solid #e8501a;
+            padding:0.8rem 1.2rem; border-radius:4px;">
+            <div style="font-size:0.8rem; color:#666;">신규방식 2025년 전체 합계</div>
+            <div style="font-size:1.3rem; font-weight:700; color:#e8501a;">{gj_to_unit(new_total_2025):,.1f} {_ul}</div>
+        </div>""", unsafe_allow_html=True)
+        cc1.markdown(f"""<div style="background:#f9f9f9; border-left:4px solid {card_ct1};
+            padding:0.8rem 1.2rem; border-radius:4px;">
+            <div style="font-size:0.8rem; color:#666;">연간 차이 (신규 − 이전)</div>
+            <div style="font-size:1.5rem; font-weight:800; color:{card_ct1};">{sign_t1}{total_pct_t1:.2f}%</div>
+            <div style="font-size:0.8rem; color:#888;">{sign_t1}{gj_to_unit(total_diff_t1):,.1f} {_ul}</div>
+        </div>""", unsafe_allow_html=True)
+        st.markdown("---")
         selected_product = st.selectbox(
             "비교할 상품 선택", options=common_products,
             index=common_products.index("개별난방용") if "개별난방용" in common_products else 0)
@@ -681,7 +715,7 @@ with tab1:
             }])
             tbl_mo_full = pd.concat([tbl_mo_yr, subtotal_mo], ignore_index=True)
             fmt_dict = {col_name:"{:,.1f}", col_name2:"{:,.1f}", f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}
-            st.dataframe(tbl_mo_full.style.format(fmt_dict)
+            st.dataframe(tbl_mo_full.style.format(fmt_dict).apply(style_subtotal_any, axis=None)
                 .map(color_pct, subset=["차이(%)"]), use_container_width=True, hide_index=True)
         st.markdown(f'<div class="sub">📋 연도별 비교 테이블 — {selected_product}</div>', unsafe_allow_html=True)
         col_o = f"이전방식_{_ul}"
@@ -886,7 +920,7 @@ with tab2:
     }])
     tbl_k_full = pd.concat([tbl_k, sub_k], ignore_index=True)
     fmt_k = {col_r:"{:,.1f}", col_kg:"{:,.1f}", f"차이_{_ul}":"{:,.1f}", "차이(%)":"{:+.2f}%"}
-    st.dataframe(tbl_k_full.style.format(fmt_k)
+    st.dataframe(tbl_k_full.style.format(fmt_k).apply(style_subtotal_any, axis=None)
         .map(color_pct, subset=["차이(%)"]), use_container_width=True, hide_index=True)
     st.markdown("<br>", unsafe_allow_html=True)
     # ── 전체 상품 연간 비교 테이블 (정산그룹 병합 구조 — HTML rowspan)
