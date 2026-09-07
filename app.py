@@ -501,25 +501,26 @@ if new_result.empty:
 _ng_df = total_supply_df.copy()
 _ng_df["연월_str"] = pd.to_datetime(_ng_df["연월"]).dt.strftime("%Y-%m")
 _ng_series = _ng_df.set_index("연월_str")["총공급량_GJ"]
-# KOGAS 제출 데이터가 있는 2025년 월 목록
+# KOGAS 제출 데이터: 전체 연도별 월 목록 추출
 if kogas_gj_df is not None and len(kogas_gj_df.columns) > 0:
-    _KOGAS_MONTHS = sorted([c for c in kogas_gj_df.columns if str(c).startswith("2025")])
+    _ALL_KOGAS_COLS = sorted(kogas_gj_df.columns)
+    _KOGAS_YEARS = sorted(set(int(c[:4]) for c in _ALL_KOGAS_COLS if len(c) >= 4 and c[:4].isdigit()))
 else:
-    _KOGAS_MONTHS = []
-# 2025년 천연가스 공급량 (BIO 제외 총량)
-_ss_natgas_2025 = _ng_series.reindex(_KOGAS_MONTHS, fill_value=0)
-# KOGAS 제출 실제 총량 (MJ→GJ 환산값 그대로)
-if kogas_gj_df is not None and _KOGAS_MONTHS:
-    _KOGAS_MONTHLY_TOTAL_GJ = kogas_gj_df.reindex(columns=_KOGAS_MONTHS, fill_value=0.0).sum(axis=0)
-else:
-    _KOGAS_MONTHLY_TOTAL_GJ = pd.Series(0.0, index=_KOGAS_MONTHS)
-# KOGAS_GJ = 스프레드시트 MJ값 ÷ 1000 (원본 그대로, 스케일링 없음)
-if kogas_gj_df is not None and _KOGAS_MONTHS:
-    KOGAS_GJ = kogas_gj_df.reindex(columns=_KOGAS_MONTHS, fill_value=0.0)
-else:
-    KOGAS_GJ = pd.DataFrame(0.0, index=PRODUCT_LIST, columns=_KOGAS_MONTHS)
-    KOGAS_GJ.index.name = "상품"
-_SS_NEW_TOTAL_2025 = _ss_natgas_2025
+    _ALL_KOGAS_COLS = []
+    _KOGAS_YEARS = []
+
+def _get_kogas_for_year(yr):
+    """선택된 연도의 KOGAS 월 목록, KOGAS_GJ DataFrame, 월별 총량, 비교방식 총량을 반환."""
+    months = sorted([c for c in _ALL_KOGAS_COLS if str(c).startswith(str(yr))])
+    natgas_yr = _ng_series.reindex(months, fill_value=0)
+    if kogas_gj_df is not None and months:
+        kg = kogas_gj_df.reindex(columns=months, fill_value=0.0)
+        kg_total = kg.sum(axis=0)
+    else:
+        kg = pd.DataFrame(0.0, index=PRODUCT_LIST, columns=months)
+        kg.index.name = "상품"
+        kg_total = pd.Series(0.0, index=months)
+    return months, kg, kg_total, natgas_yr
 common_products = [p for p in PRODUCT_LIST
                    if p in new_result["상품"].unique()
                    and (old_result.empty or p in old_result["상품"].unique())]
@@ -710,15 +711,18 @@ with tab1:
             fig_mo_yr.add_trace(go.Bar(x=MONTH_KR, y=new_mo_vals, name="신규방식", marker_color="#e8501a",
                 hovertemplate=f"신규방식<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
             mo_ann = []
-            for m, pct, nv in zip(MONTH_KR, mo_pct, new_mo_vals):
+            min_mo_label_y = max_mo * 0.12
+            for m, pct, ov, nv in zip(MONTH_KR, mo_pct, old_mo_vals, new_mo_vals):
                 sign  = "+" if pct >= 0 else ""
                 color = "#e8501a" if pct >= 0 else "#2c5f8a"
-                mo_ann.append(dict(x=m, y=nv + max_mo * 0.02, text=f"<b>{sign}{pct:.1f}%</b>",
+                bar_top = max(ov, nv)
+                label_y = max(bar_top + max_mo * 0.03, min_mo_label_y)
+                mo_ann.append(dict(x=m, y=label_y, text=f"<b>{sign}{pct:.1f}%</b>",
                     showarrow=False, font=dict(size=13, color=color), xanchor="center", yanchor="bottom"))
             fig_mo_yr.update_layout(barmode="group", height=420,
                 title=dict(text=f"{sel_year}년 월별 비교 — {selected_product}", font=dict(size=15)),
                 xaxis_title="월", yaxis_title=f"공급량 ({_ul})",
-                yaxis=dict(range=[0, max_mo*1.18], showgrid=True, gridcolor="#ebebeb"),
+                yaxis=dict(range=[0, max_mo*1.22], showgrid=True, gridcolor="#ebebeb"),
                 legend=dict(orientation="h", yanchor="bottom", y=1.02),
                 plot_bgcolor="white", paper_bgcolor="white", margin=dict(l=70,r=20,t=80,b=40), annotations=mo_ann)
             st.plotly_chart(fig_mo_yr, use_container_width=True)
@@ -757,15 +761,24 @@ with tab1:
 with tab2:
     st.markdown("""
     <span style="color:#888; font-size:0.85rem; line-height:2.5;">
-    ※ 세 방식 모두 <b>BIO가스를 제외한 천연가스 공급량(스프레드시트 행4)</b>을 비교 기준 총량으로 사용합니다.
-    &nbsp;|&nbsp; KOGAS 제출 물량은 2025년 1~12월 데이터만 제공됩니다.</span>
+    ※ 세 방식 모두 <b>BIO가스를 제외한 천연가스 공급량(스프레드시트 행4)</b>을 비교 기준 총량으로 사용합니다.</span>
     <br>
     """, unsafe_allow_html=True)
-    if not _KOGAS_MONTHS:
+    if not _KOGAS_YEARS:
         st.warning(
             "⚠️ 구글시트에서 '가스공사 제출용 판매량(MJ)' 표를 찾지 못해 KOGAS 제출 물량 비교를 표시할 수 없습니다. "
             "시트에 해당 표가 있는지, 제목 텍스트가 남아있는지 확인해주세요."
         )
+        st.stop()
+    # ── 연도 선택
+    sel_kogas_year = st.selectbox(
+        "연도 선택", options=_KOGAS_YEARS,
+        index=_KOGAS_YEARS.index(2025) if 2025 in _KOGAS_YEARS else 0,
+        key="kogas_year_sel",
+    )
+    kogas_months, KOGAS_GJ, kogas_monthly_total, natgas_yr = _get_kogas_for_year(sel_kogas_year)
+    if not kogas_months:
+        st.info(f"{sel_kogas_year}년 KOGAS 데이터가 없습니다.")
         st.stop()
     # ── 비교 방식 선택 (토글)
     compare_mode = st.radio(
@@ -777,26 +790,25 @@ with tab2:
     )
     use_old_mode = (compare_mode == "이전방식 vs KOGAS 제출 물량")
     _ul = unit_label()
-    KOGAS_2025_MONTHS = _KOGAS_MONTHS
     # ── 비교 방식에 따른 레이블/색상 설정
     if use_old_mode:
         _badge_all  = "이전방식"
         _color_all  = "#1a3c6e"
-        ratio_src_all = old_result[old_result["연월"].dt.year == 2025].copy() if not old_result.empty else pd.DataFrame()
+        ratio_src_all = old_result[old_result["연월"].dt.year == sel_kogas_year].copy() if not old_result.empty else pd.DataFrame()
     else:
         _badge_all  = "신규방식"
         _color_all  = "#1a3c6e"
-        ratio_src_all = new_result[new_result["연월"].dt.year == 2025].copy()
+        ratio_src_all = new_result[new_result["연월"].dt.year == sel_kogas_year].copy()
     # ── 전체 합계 비교
-    st.markdown('<div class="sub">📊 전체 합계량 비교 — 2025년 (모든 상품 합산)</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub">📊 전체 합계량 비교 — {sel_kogas_year}년 (모든 상품 합산)</div>', unsafe_allow_html=True)
     ratio_total_mo_gj = [
         ratio_src_all[ratio_src_all["연월"].dt.strftime("%Y-%m") == m]["공급량_GJ"].sum()
         if not ratio_src_all.empty else 0
-        for m in KOGAS_2025_MONTHS
+        for m in kogas_months
     ]
-    kogas_total_mo_gj = [float(_KOGAS_MONTHLY_TOTAL_GJ.get(m, 0)) for m in KOGAS_2025_MONTHS]
+    kogas_total_mo_gj = [float(kogas_monthly_total.get(m, 0)) for m in kogas_months]
     if not use_old_mode:
-        ratio_total_mo_gj = [float(_SS_NEW_TOTAL_2025.get(m, 0)) for m in KOGAS_2025_MONTHS]
+        ratio_total_mo_gj = [float(natgas_yr.get(m, 0)) for m in kogas_months]
     ratio_total_ann = sum(ratio_total_mo_gj)
     kogas_total_ann = sum(kogas_total_mo_gj)
     total_diff_gj   = ratio_total_ann - kogas_total_ann
@@ -806,12 +818,12 @@ with tab2:
     ca, cb, cc = st.columns(3)
     ca.markdown(f"""<div style="background:#f4f8fc; border-left:4px solid {_color_all};
         padding:0.8rem 1.2rem; border-radius:4px;">
-        <div style="font-size:0.8rem; color:#666;">{_badge_all} 2025년 전체 합계</div>
+        <div style="font-size:0.8rem; color:#666;">{_badge_all} {sel_kogas_year}년 전체 합계</div>
         <div style="font-size:1.3rem; font-weight:700; color:{_color_all};">{gj_to_unit(ratio_total_ann):,.1f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
     cb.markdown(f"""<div style="background:#e8f7fa; border-left:4px solid #0097b2;
         padding:0.8rem 1.2rem; border-radius:4px;">
-        <div style="font-size:0.8rem; color:#666;">KOGAS 제출 2025년 전체 합계</div>
+        <div style="font-size:0.8rem; color:#666;">KOGAS 제출 {sel_kogas_year}년 전체 합계</div>
         <div style="font-size:1.3rem; font-weight:700; color:#0097b2;">{gj_to_unit(kogas_total_ann):,.1f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
     cc.markdown(f"""<div style="background:#f9f9f9; border-left:4px solid {card_ct};
@@ -831,22 +843,22 @@ with tab2:
     if k_selected in KOGAS_GJ.index:
         kogas_prod_gj = KOGAS_GJ.loc[k_selected]
     else:
-        kogas_prod_gj = pd.Series(0.0, index=KOGAS_2025_MONTHS)
+        kogas_prod_gj = pd.Series(0.0, index=kogas_months)
     badge_label = _badge_all
     bar_color   = "#1a3c6e"
     if use_old_mode:
         ratio_src = old_result[old_result["상품"] == k_selected].copy() if not old_result.empty else pd.DataFrame()
     else:
         ratio_src = new_result[new_result["상품"] == k_selected].copy()
-    ratio_src_2025 = ratio_src[ratio_src["연월"].dt.year == 2025].copy() if not ratio_src.empty else pd.DataFrame()
-    if not ratio_src_2025.empty:
-        ratio_src_2025["연월_str"] = ratio_src_2025["연월"].dt.strftime("%Y-%m")
-        ratio_monthly = ratio_src_2025.set_index("연월_str")["공급량_GJ"].reindex(KOGAS_2025_MONTHS, fill_value=0)
+    ratio_src_yr = ratio_src[ratio_src["연월"].dt.year == sel_kogas_year].copy() if not ratio_src.empty else pd.DataFrame()
+    if not ratio_src_yr.empty:
+        ratio_src_yr["연월_str"] = ratio_src_yr["연월"].dt.strftime("%Y-%m")
+        ratio_monthly = ratio_src_yr.set_index("연월_str")["공급량_GJ"].reindex(kogas_months, fill_value=0)
     else:
-        ratio_monthly = pd.Series(0.0, index=KOGAS_2025_MONTHS)
-    MONTH_KR = ["1월","2월","3월","4월","5월","6월","7월","8월","9월","10월","11월","12월"]
-    ratio_vals_gj  = [ratio_monthly.get(m, 0) for m in KOGAS_2025_MONTHS]
-    kogas_vals_gj  = [float(kogas_prod_gj.get(m, 0)) for m in KOGAS_2025_MONTHS]
+        ratio_monthly = pd.Series(0.0, index=kogas_months)
+    MONTH_KR = [f"{i}월" for i in range(1, len(kogas_months) + 1)]
+    ratio_vals_gj  = [ratio_monthly.get(m, 0) for m in kogas_months]
+    kogas_vals_gj  = [float(kogas_prod_gj.get(m, 0)) for m in kogas_months]
     ratio_vals     = [gj_to_unit(v) for v in ratio_vals_gj]
     kogas_vals     = [gj_to_unit(v) for v in kogas_vals_gj]
     diff_vals_gj   = [r - k for r, k in zip(ratio_vals_gj, kogas_vals_gj)]
@@ -862,12 +874,12 @@ with tab2:
     c1, c2, c3 = st.columns(3)
     c1.markdown(f"""<div style="background:#f4f8fc; border-left:4px solid {bar_color};
         padding:0.8rem 1.2rem; border-radius:4px;">
-        <div style="font-size:0.8rem; color:#666;">{badge_label} 2025년 합계</div>
+        <div style="font-size:0.8rem; color:#666;">{badge_label} {sel_kogas_year}년 합계</div>
         <div style="font-size:1.3rem; font-weight:700; color:{bar_color};">{gj_to_unit(ratio_annual):,.1f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
     c2.markdown(f"""<div style="background:#e8f7fa; border-left:4px solid #0097b2;
         padding:0.8rem 1.2rem; border-radius:4px;">
-        <div style="font-size:0.8rem; color:#666;">KOGAS 제출 2025년 합계</div>
+        <div style="font-size:0.8rem; color:#666;">KOGAS 제출 {sel_kogas_year}년 합계</div>
         <div style="font-size:1.3rem; font-weight:700; color:#0097b2;">{gj_to_unit(kogas_annual):,.1f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
     c3.markdown(f"""<div style="background:#f9f9f9; border-left:4px solid {card_c};
@@ -878,7 +890,7 @@ with tab2:
     </div>""", unsafe_allow_html=True)
     st.markdown("<br>", unsafe_allow_html=True)
     # ── 월별 막대 비교 차트
-    st.markdown(f'<div class="sub">📊 월별 비교 — {k_selected} ({_ul}) · 2025년</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub">📊 월별 비교 — {k_selected} ({_ul}) · {sel_kogas_year}년</div>', unsafe_allow_html=True)
     max_k = max(max(ratio_vals, default=1), max(kogas_vals, default=1))
     fig_k = go.Figure()
     fig_k.add_trace(go.Bar(x=MONTH_KR, y=ratio_vals, name=badge_label, marker_color=bar_color,
@@ -886,14 +898,17 @@ with tab2:
     fig_k.add_trace(go.Bar(x=MONTH_KR, y=kogas_vals, name="KOGAS 제출", marker_color="#0097b2",
         hovertemplate=f"KOGAS 제출<br>%{{x}}<br>%{{y:,.1f}} {_ul}<extra></extra>"))
     k_ann = []
-    for m, pct, rv in zip(MONTH_KR, mo_pct_k, ratio_vals):
+    min_label_y = max_k * 0.12  # 라벨이 너무 아래로 내려가지 않도록 최소 높이 보장
+    for m, pct, rv, kv in zip(MONTH_KR, mo_pct_k, ratio_vals, kogas_vals):
         sign  = "+" if pct >= 0 else ""
         color = "#e8501a" if pct >= 0 else "#2c5f8a"
-        k_ann.append(dict(x=m, y=rv + max_k * 0.02, text=f"<b>{sign}{pct:.1f}%</b>",
+        bar_top = max(rv, kv)
+        label_y = max(bar_top + max_k * 0.03, min_label_y)
+        k_ann.append(dict(x=m, y=label_y, text=f"<b>{sign}{pct:.1f}%</b>",
             showarrow=False, font=dict(size=12, color=color), xanchor="center", yanchor="bottom"))
     fig_k.update_layout(barmode="group", height=440,
         xaxis_title="월", yaxis_title=f"공급량 ({_ul})",
-        yaxis=dict(range=[0, max_k*1.18], showgrid=True, gridcolor="#ebebeb"),
+        yaxis=dict(range=[0, max_k*1.22], showgrid=True, gridcolor="#ebebeb"),
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         plot_bgcolor="white", paper_bgcolor="white",
         margin=dict(l=70,r=20,t=60,b=40), annotations=k_ann)
@@ -919,7 +934,7 @@ with tab2:
                 "modeBarButtonsToAdd":["pan2d"],"modeBarButtonsToRemove":["lasso2d","select2d"]})
     st.markdown("---")
     # ── 월별 비교 테이블
-    st.markdown(f'<div class="sub">📋 월별 비교 테이블 — {k_selected} (2025년)</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub">📋 월별 비교 테이블 — {k_selected} ({sel_kogas_year}년)</div>', unsafe_allow_html=True)
     col_r = f"{badge_label}_{_ul}"
     col_kg = f"KOGAS제출_{_ul}"
     tbl_k = pd.DataFrame({
@@ -942,19 +957,19 @@ with tab2:
         .map(color_pct, subset=["차이(%)"]), use_container_width=True, hide_index=True)
     st.markdown("<br>", unsafe_allow_html=True)
     # ── 전체 상품 연간 비교 테이블 (정산그룹 병합 구조 — HTML rowspan)
-    st.markdown('<div class="sub">📋 전체 상품 연간 비교 — 2025년 합계</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="sub">📋 전체 상품 연간 비교 — {sel_kogas_year}년 합계</div>', unsafe_allow_html=True)
     product_data = {}
     for p in PRODUCT_LIST:
         if use_old_mode:
             p_src = old_result[old_result["상품"] == p] if not old_result.empty else pd.DataFrame()
         else:
             p_src = new_result[new_result["상품"] == p]
-        p_2025 = p_src[p_src["연월"].dt.year == 2025]["공급량_GJ"].sum() if not p_src.empty else 0.0
-        k_2025 = float(KOGAS_GJ.loc[p, _KOGAS_MONTHS].sum()) if p in KOGAS_GJ.index else 0.0
-        diff_v = p_2025 - k_2025
-        pct_v  = diff_v / k_2025 * 100 if k_2025 else 0.0
+        p_yr = p_src[p_src["연월"].dt.year == sel_kogas_year]["공급량_GJ"].sum() if not p_src.empty else 0.0
+        k_yr = float(KOGAS_GJ.loc[p, kogas_months].sum()) if p in KOGAS_GJ.index else 0.0
+        diff_v = p_yr - k_yr
+        pct_v  = diff_v / k_yr * 100 if k_yr else 0.0
         product_data[p] = {
-            "r_gj": p_2025, "k_gj": k_2025,
+            "r_gj": p_yr, "k_gj": k_yr,
             "diff_gj": diff_v, "pct": pct_v,
         }
     def calc_sub(prods):
@@ -1075,7 +1090,7 @@ with tab2:
         tbl_all_excel.to_excel(w, sheet_name="전체상품_연간비교", index=False)
     st.download_button(
         f"⬇️ KOGAS 비교 엑셀 다운로드", data=buf_k.getvalue(),
-        file_name=f"KOGAS비교_{k_selected}_2025.xlsx",
+        file_name=f"KOGAS비교_{k_selected}_{sel_kogas_year}.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key="dl_kogas",
     )
