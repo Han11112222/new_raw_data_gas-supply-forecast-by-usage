@@ -123,18 +123,19 @@ def load_gsheet_data():
         resp.raise_for_status()
         raw = pd.read_csv(StringIO(resp.text), header=None)
         debug["raw_shape"] = raw.shape
-        # ── [1] 신규방식: "상품별 분배" 표 (D49:ZZ62, 재무팀 실측 상품별 공급량 GJ) ──
+        # ── [1] 신규방식: "상품별 분배" 표 (D49:ZZ62, 스프레드시트 MJ) ──
         dates_valid, supply_df, err, sdbg = _extract_product_table(raw, SUPPLY_TABLE_TITLE_VARIANTS)
         debug["supply_table"] = sdbg
         if err:
             return None, None, None, None, None, None, None, err, debug
-        # 천연가스 공급량(GJ): 행4(0-indexed=3), C열(idx=2)부터 — BIO 제외 총량
+        supply_df = supply_df / MJ_TO_GJ  # MJ → GJ 변환
+        # 천연가스 공급량: 행4(0-indexed=3), C열(idx=2)부터 — BIO 제외 총량 (MJ → GJ)
         valid_cols = [i for i, d in enumerate(
             pd.to_datetime(raw.iloc[sdbg["header_idx"], DATA_START_COL:], errors="coerce")) if pd.notna(d)]
         natgas_raw = raw.iloc[NATGAS_ROW_IDX, TOTAL_START_COL:].reset_index(drop=True)
         natgas_vals = pd.to_numeric(
             natgas_raw.iloc[[v + 1 for v in valid_cols]]
-            .astype(str).str.replace(",", ""), errors="coerce").values
+            .astype(str).str.replace(",", ""), errors="coerce").values / MJ_TO_GJ  # MJ → GJ
         natgas_supply_df = pd.DataFrame({"연월": dates_valid.values, "천연가스공급량_GJ": natgas_vals})
         natgas_supply_df = natgas_supply_df[natgas_supply_df["천연가스공급량_GJ"] > 0].reset_index(drop=True)
         total_supply_df = natgas_supply_df.rename(columns={"천연가스공급량_GJ": "총공급량_GJ"})
@@ -146,7 +147,7 @@ def load_gsheet_data():
         ratio_df = ratio_df.fillna(0.0)
         debug["dates_min"] = str(dates_valid.min()) if len(dates_valid) else None
         debug["dates_max"] = str(dates_valid.max()) if len(dates_valid) else None
-        # ── [2] 이전방식: "(last ver) 마케팅팀 상품별 분배" 표 (D94:ZZ107, GJ) ──
+        # ── [2] 이전방식: "(last ver) 마케팅팀 상품별 분배" 표 (D94:ZZ107, 스프레드시트 MJ) ──
         old_dates, old_supply_df, oerr, odbg = _extract_product_table(raw, OLD_TABLE_TITLE_VARIANTS)
         debug["old_table"] = odbg
         if oerr or old_supply_df is None:
@@ -154,6 +155,7 @@ def load_gsheet_data():
             old_supply_df = None
             old_ratio_df = None
         else:
+            old_supply_df = old_supply_df / MJ_TO_GJ  # MJ → GJ 변환
             old_col_sum = old_supply_df.sum(axis=0)
             with np.errstate(divide="ignore", invalid="ignore"):
                 old_ratio_df = old_supply_df.div(old_col_sum.replace(0, np.nan), axis=1) * 100
