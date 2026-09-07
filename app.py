@@ -303,6 +303,20 @@ def build_html_pivot(display_df, row_types, fmt_func=None, diff_mode=False, grad
             abs_max = float(np.nanmax(np.abs(data_vals))) if diff_mode else float(np.nanmax(data_vals))
             if abs_max == 0: abs_max = 1.0
         except: abs_max = 1.0
+    # 각 열(월)별 합계 계산 — 비중 50% 초과 셀에만 그라데이션 적용
+    col_totals = {}
+    if gradient and not diff_mode:
+        total_mask = [i for i, t in enumerate(row_types) if t == "total"]
+        if total_mask:
+            total_i = total_mask[0]
+            for dc in date_cols:
+                try: col_totals[dc] = float(df.at[total_i, dc])
+                except: col_totals[dc] = 0.0
+        else:
+            data_mask2 = [i for i, t in enumerate(row_types) if t == "data"]
+            for dc in date_cols:
+                try: col_totals[dc] = float(df.loc[data_mask2, dc].astype(float).sum())
+                except: col_totals[dc] = 0.0
     group_cell = {}
     gi = 0
     for gname, gspan in GROUP_SPANS:
@@ -336,7 +350,11 @@ def build_html_pivot(display_df, row_types, fmt_func=None, diff_mode=False, grad
             disp = "-" if is_nan else (fmt_func(fval) if fmt_func else f"{fval:,.0f}")
             style_parts = []
             if not is_nan and gradient and rtype == "data":
-                bg = _gradient_bg(fval, abs_max, diff_mode)
+                # diff_mode가 아닌 경우: 비중 50% 초과인 셀에만 그라데이션
+                col_total = col_totals.get(dc, 0.0)
+                pct_share = abs(fval) / col_total * 100 if col_total else 0.0
+                apply_bg = diff_mode or pct_share > 50
+                bg = _gradient_bg(fval, abs_max, diff_mode) if apply_bg else ""
                 if bg: style_parts.append(bg)
                 if diff_mode:
                     tc = _diff_text_color(fval)
