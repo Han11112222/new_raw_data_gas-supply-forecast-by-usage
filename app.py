@@ -917,10 +917,10 @@ with tab2:
     sales_total_mo_gj = [float(sales_monthly_total.get(m, 0)) for m in sales_months]
     ratio_total_ann = sum(ratio_total_mo_gj)
     sales_total_ann = sum(sales_total_mo_gj)
-    total_diff_gj   = ratio_total_ann - sales_total_ann
-    total_pct       = total_diff_gj / sales_total_ann * 100 if sales_total_ann else 0
+    total_diff_gj   = sales_total_ann - ratio_total_ann
+    total_pct       = total_diff_gj / ratio_total_ann * 100 if ratio_total_ann else 0
     sign_t          = "+" if total_pct >= 0 else ""
-    card_ct         = "#e8501a" if total_pct >= 0 else "#2c5f8a"
+    card_ct         = "#2c5f8a" if total_pct >= 0 else "#e8501a"
     ca, cb, cc = st.columns(3)
     ca.markdown(f"""<div style="background:#f4f8fc; border-left:4px solid {_color_all};
         padding:0.8rem 1.2rem; border-radius:4px;">
@@ -934,7 +934,7 @@ with tab2:
     </div>""", unsafe_allow_html=True)
     cc.markdown(f"""<div style="background:#f9f9f9; border-left:4px solid {card_ct};
         padding:0.8rem 1.2rem; border-radius:4px;">
-        <div style="font-size:0.8rem; color:#666;">연간 차이 ({_badge_all} − 판매량)</div>
+        <div style="font-size:0.8rem; color:#666;">연간 차이 (판매량 − {_badge_all})</div>
         <div style="font-size:1.5rem; font-weight:800; color:{card_ct};">{sign_t}{total_pct:.2f}%</div>
         <div style="font-size:0.8rem; color:#888;">{sign_t}{gj_to_unit(total_diff_gj):,.0f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
@@ -967,16 +967,16 @@ with tab2:
     sales_vals_gj  = [float(sales_prod_gj.get(m, 0)) for m in sales_months]
     ratio_vals     = [gj_to_unit(v) for v in ratio_vals_gj]
     sales_vals     = [gj_to_unit(v) for v in sales_vals_gj]
-    diff_vals_gj   = [r - s for r, s in zip(ratio_vals_gj, sales_vals_gj)]
+    diff_vals_gj   = [s - r for r, s in zip(ratio_vals_gj, sales_vals_gj)]
     diff_vals      = [gj_to_unit(v) for v in diff_vals_gj]
-    mo_pct_s       = [(r - s) / s * 100 if s else 0.0 for r, s in zip(ratio_vals_gj, sales_vals_gj)]
+    mo_pct_s       = [(s - r) / r * 100 if r else 0.0 for r, s in zip(ratio_vals_gj, sales_vals_gj)]
     # ── 연간 요약 카드
     ratio_annual   = sum(ratio_vals_gj)
     sales_annual   = sum(sales_vals_gj)
-    annual_diff_gj = ratio_annual - sales_annual
-    annual_pct     = annual_diff_gj / sales_annual * 100 if sales_annual else 0
+    annual_diff_gj = sales_annual - ratio_annual
+    annual_pct     = annual_diff_gj / ratio_annual * 100 if ratio_annual else 0
     sign_a         = "+" if annual_pct >= 0 else ""
-    card_c         = "#e8501a" if annual_pct >= 0 else "#2c5f8a"
+    card_c         = "#2c5f8a" if annual_pct >= 0 else "#e8501a"
     c1, c2, c3 = st.columns(3)
     c1.markdown(f"""<div style="background:#f4f8fc; border-left:4px solid {bar_color};
         padding:0.8rem 1.2rem; border-radius:4px;">
@@ -990,7 +990,7 @@ with tab2:
     </div>""", unsafe_allow_html=True)
     c3.markdown(f"""<div style="background:#f9f9f9; border-left:4px solid {card_c};
         padding:0.8rem 1.2rem; border-radius:4px;">
-        <div style="font-size:0.8rem; color:#666;">연간 차이 ({badge_label} − 판매량)</div>
+        <div style="font-size:0.8rem; color:#666;">연간 차이 (판매량 − {badge_label})</div>
         <div style="font-size:1.5rem; font-weight:800; color:{card_c};">{sign_a}{annual_pct:.2f}%</div>
         <div style="font-size:0.8rem; color:#888;">{sign_a}{gj_to_unit(annual_diff_gj):,.0f} {_ul}</div>
     </div>""", unsafe_allow_html=True)
@@ -1007,7 +1007,7 @@ with tab2:
     min_label_y = max_k * 0.12  # 라벨이 너무 아래로 내려가지 않도록 최소 높이 보장
     for m, pct, rv, sv in zip(MONTH_KR, mo_pct_s, ratio_vals, sales_vals):
         sign  = "+" if pct >= 0 else ""
-        color = "#e8501a" if pct >= 0 else "#2c5f8a"
+        color = "#2c5f8a" if pct >= 0 else "#e8501a"
         bar_top = max(rv, sv)
         label_y = max(bar_top + max_k * 0.03, min_label_y)
         k_ann.append(dict(x=m, y=label_y, text=f"<b>{sign}{pct:.1f}%</b>",
@@ -1022,14 +1022,44 @@ with tab2:
     # ── 월별 추이 라인 차트
     st.markdown(f'<div class="sub">📈 월별 추이 비교 — {k_selected} ({_ul})</div>', unsafe_allow_html=True)
     st.caption("💡 마우스 휠: 확대/축소 | 드래그: 이동")
+    # ── 다른 방식 활성화 토글 (우측 정렬)
+    _other_label = "신규방식" if use_old_mode else "이전방식"
+    _toggle_col1, _toggle_col2 = st.columns([3, 1])
+    with _toggle_col2:
+        show_other = st.checkbox(
+            f"📊 {_other_label} 추가 표시",
+            value=False,
+            key="toggle_other_method",
+        )
     fig_k_line = go.Figure()
     fig_k_line.add_trace(go.Scatter(x=MONTH_KR, y=ratio_vals, name=badge_label,
-        mode="lines+markers", line=dict(color=bar_color, width=2),
+        mode="lines+markers", line=dict(color=bar_color, width=2.5),
         hovertemplate=f"{badge_label}<br>%{{x}}<br>%{{y:,.0f}} {_ul}<extra></extra>"))
     fig_k_line.add_trace(go.Scatter(x=MONTH_KR, y=sales_vals, name="판매량 실적",
-        mode="lines+markers", line=dict(color="#2e7d32", width=2, dash="dot"),
+        mode="lines+markers", line=dict(color="#2e7d32", width=2.5, dash="dot"),
         hovertemplate=f"판매량 실적<br>%{{x}}<br>%{{y:,.0f}} {_ul}<extra></extra>"))
-    fig_k_line.update_layout(height=380, xaxis_title="월", yaxis_title=f"공급량 ({_ul})",
+    # ── 다른 방식 라인 추가
+    if show_other:
+        if use_old_mode:
+            other_src = new_result[new_result["상품"] == k_selected].copy()
+            other_label = "신규방식"
+            other_color = "#e8501a"
+        else:
+            other_src = old_result[old_result["상품"] == k_selected].copy() if not old_result.empty else pd.DataFrame()
+            other_label = "이전방식"
+            other_color = "#2c5f8a"
+        other_yr = other_src[other_src["연월"].dt.year == sel_sales_year].copy() if not other_src.empty else pd.DataFrame()
+        if not other_yr.empty:
+            other_yr["연월_str"] = other_yr["연월"].dt.strftime("%Y-%m")
+            other_monthly = other_yr.set_index("연월_str")["공급량_GJ"].reindex(sales_months, fill_value=0)
+        else:
+            other_monthly = pd.Series(0.0, index=sales_months)
+        other_vals = [gj_to_unit(other_monthly.get(m, 0)) for m in sales_months]
+        fig_k_line.add_trace(go.Scatter(x=MONTH_KR, y=other_vals, name=other_label,
+            mode="lines+markers", line=dict(color=other_color, width=2, dash="dashdot"),
+            marker=dict(size=6, symbol="diamond"),
+            hovertemplate=f"{other_label}<br>%{{x}}<br>%{{y:,.0f}} {_ul}<extra></extra>"))
+    fig_k_line.update_layout(height=400, xaxis_title="월", yaxis_title=f"공급량 ({_ul})",
         legend=dict(orientation="h", yanchor="bottom", y=1.02),
         plot_bgcolor="white", paper_bgcolor="white",
         margin=dict(l=70,r=20,t=40,b=40), dragmode="pan")
@@ -1054,8 +1084,8 @@ with tab2:
         col_r:          sum(ratio_vals),
         col_sg:         sum(sales_vals),
         f"차이_{_ul}":  sum(diff_vals),
-        "차이(%)":      (sum(ratio_vals_gj) - sum(sales_vals_gj)) / sum(sales_vals_gj) * 100
-                        if sum(sales_vals_gj) else 0.0,
+        "차이(%)":      (sum(sales_vals_gj) - sum(ratio_vals_gj)) / sum(ratio_vals_gj) * 100
+                        if sum(ratio_vals_gj) else 0.0,
     }])
     tbl_s_full = pd.concat([tbl_s, sub_s], ignore_index=True)
     fmt_s = {col_r:"{:,.0f}", col_sg:"{:,.0f}", f"차이_{_ul}":"{:,.0f}", "차이(%)":"{:+.2f}%"}
@@ -1072,8 +1102,8 @@ with tab2:
             p_src = new_result[new_result["상품"] == p]
         p_yr = p_src[p_src["연월"].dt.year == sel_sales_year]["공급량_GJ"].sum() if not p_src.empty else 0.0
         s_yr = float(SALES_GJ.loc[p, sales_months].sum()) if p in SALES_GJ.index else 0.0
-        diff_v = p_yr - s_yr
-        pct_v  = diff_v / s_yr * 100 if s_yr else 0.0
+        diff_v = s_yr - p_yr
+        pct_v  = diff_v / p_yr * 100 if p_yr else 0.0
         product_data[p] = {
             "r_gj": p_yr, "s_gj": s_yr,
             "diff_gj": diff_v, "pct": pct_v,
@@ -1081,17 +1111,17 @@ with tab2:
     def calc_sub(prods):
         sr = sum(product_data[p]["r_gj"] for p in prods if p in product_data)
         ss = sum(product_data[p]["s_gj"] for p in prods if p in product_data)
-        sd = sr - ss
-        sp = sd / ss * 100 if ss else 0.0
+        sd = ss - sr
+        sp = sd / sr * 100 if sr else 0.0
         return sr, ss, sd, sp
     h_r, h_s, h_d, h_p = calc_sub(HOUSING_PRODUCTS)
     o_r, o_s, o_d, o_p = calc_sub(OTHER_PRODUCTS)
     tot_r = h_r + o_r
     tot_s = h_s + o_s
-    tot_d = tot_r - tot_s
-    tot_p = tot_d / tot_s * 100 if tot_s else 0.0
+    tot_d = tot_s - tot_r
+    tot_p = tot_d / tot_r * 100 if tot_r else 0.0
     def _pct_color(v):
-        return "#c0390b" if v >= 0 else "#1a4f8a"
+        return "#1a4f8a" if v >= 0 else "#c0390b"
     def _fmt_num(v):
         return f"{gj_to_unit(v):,.0f}"
     def _fmt_pct(v):
@@ -1124,7 +1154,7 @@ with tab2:
     col_h1 = badge_label + f" ({_ul})"
     col_h2 = f"판매량 실적 ({_ul})"
     col_h3 = f"차이 ({_ul})"
-    col_h4 = "차이 (%)"
+    col_h4 = "차이 (%) 판매량기준"
     hdr = f"""<tr>
       <th class="th-grp">정산그룹</th>
       <th class="th-item">정산항목</th>
