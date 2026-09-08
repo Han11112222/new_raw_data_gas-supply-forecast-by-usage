@@ -219,6 +219,18 @@ def load_sales_data():
             elif "수송" in cs and "CNG" in cs:
                 col_map[c] = "수송용"
         df = df.rename(columns=col_map)
+        # 모든 숫자 컬럼의 쉼표 제거 (예: "4,605,642" → "4605642")
+        skip_cols = set()
+        for c in df.columns:
+            cs = str(c).strip()
+            # 일자 컬럼은 건너뜀 (날짜 형식)
+            if cs in ("일자",) or "Unnamed" in cs:
+                skip_cols.add(c)
+        for c in df.columns:
+            if c in skip_cols:
+                continue
+            df[c] = df[c].astype(str).str.replace(",", "", regex=False)
+            df[c] = pd.to_numeric(df[c], errors="coerce")
         # 유효 행 필터 (연, 월이 있는 행만)
         df = df.dropna(subset=["연", "월"])
         df["연"] = df["연"].astype(int)
@@ -229,8 +241,7 @@ def load_sales_data():
         result = {}
         for p in PRODUCT_LIST:
             if p in df.columns:
-                series = pd.to_numeric(df.set_index("연월_str")[p], errors="coerce")
-                series = series.reindex(months, fill_value=0).fillna(0)
+                series = df.set_index("연월_str")[p].reindex(months, fill_value=0).fillna(0)
                 result[p] = series
             else:
                 result[p] = pd.Series(0.0, index=months)
@@ -893,17 +904,17 @@ with tab2:
         _badge_all  = "신규방식"
         _color_all  = "#1a3c6e"
         ratio_src_all = new_result[new_result["연월"].dt.year == sel_sales_year].copy()
-    # ── 전체 합계 비교
-    st.markdown(f'<div class="sub">📊 전체 합계량 비교 — {sel_sales_year}년 (모든 상품 합산)</div>', unsafe_allow_html=True)
+    # ── 전체 합계 비교 (판매량 데이터가 있는 월 기준으로 동일 기간 비교)
+    n_sales_months = len(sales_months)
+    period_label = f"{sel_sales_year}년 ({n_sales_months}개월)" if n_sales_months < 12 else f"{sel_sales_year}년"
+    st.markdown(f'<div class="sub">📊 전체 합계량 비교 — {period_label} (모든 상품 합산)</div>', unsafe_allow_html=True)
+    # 비율적용 물량도 판매량과 동일 기간만 합산 (공정한 비교)
     ratio_total_mo_gj = [
         ratio_src_all[ratio_src_all["연월"].dt.strftime("%Y-%m") == m]["공급량_GJ"].sum()
         if not ratio_src_all.empty else 0
         for m in sales_months
     ]
     sales_total_mo_gj = [float(sales_monthly_total.get(m, 0)) for m in sales_months]
-    if not use_old_mode:
-        natgas_yr = _ng_series.reindex(sales_months, fill_value=0)
-        ratio_total_mo_gj = [float(natgas_yr.get(m, 0)) for m in sales_months]
     ratio_total_ann = sum(ratio_total_mo_gj)
     sales_total_ann = sum(sales_total_mo_gj)
     total_diff_gj   = ratio_total_ann - sales_total_ann
