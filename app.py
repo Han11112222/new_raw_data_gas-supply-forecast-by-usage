@@ -48,14 +48,17 @@ NATGAS_ROW_IDX  = 3    # 행4(0-indexed=3): 천연가스 공급량(GJ) = BIO 제
 TOTAL_START_COL = 2    # 총공급량/천연가스 행은 C열(idx=2)부터 날짜 데이터
 DATA_START_COL  = 3    # 상품별분배 데이터 시작 열 (D열=3, A~C=0~2)
 # ── 테이블 제목 검색 키워드 ──
-# 신규방식: "상품별 분배" (스프레드시트 D49~ZZ62)
+# 신규방식: "[new ver] 상품별 분배(MJ)" (스프레드시트 D49~ZZ65)
 SUPPLY_TABLE_TITLE_VARIANTS = ["상품별 분배", "상품별분배"]
-# 이전방식: "(last ver) 마케팅팀 _ 상품별 분배" (스프레드시트 D94~ZZ107)
+# 이전방식: "[last ver] 상품별 분배(MJ)" (스프레드시트 D94~ZZ110)
 OLD_TABLE_TITLE_VARIANTS = ["last ver"]
 # KOGAS 제출: "가스공사 제출용 판매량" (스프레드시트 D7~ZZ20)
 KOGAS_TABLE_TITLE_VARIANTS = ["가스공사 제출용 판매량", "가스공사제출용판매량"]
 N_HOUSING = len(HOUSING_PRODUCTS)   # 4
 N_OTHER   = len(OTHER_PRODUCTS)     # 9
+# BIO가스 행 위치: 기타 상품 중 수송용(5번째) 다음에 BIO가스 행이 삽입됨
+# 신규방식·이전방식 테이블에서 이 행을 건너뛰어야 함
+BIO_SKIP_AFTER_N_OTHER = 5  # 수송용까지 5개 → BIO가스 → 열병합용부터 4개
 SUBTOTAL_LABEL = "소 계"
 TOTAL_LABEL    = "합 계"
 SUBTOTAL_STYLE = "background-color:#ddeaf8; font-weight:bold; color:#1a3c5e;"
@@ -76,11 +79,19 @@ def _find_row_containing(raw, text_variants, search_cols=(0, 1, 2, 3)):
                 if t in val_str:
                     return r
     return None
-def _extract_product_table(raw, title_variants, data_start_col=DATA_START_COL):
+def _extract_product_table(raw, title_variants, data_start_col=DATA_START_COL, skip_bio=False):
     """
-    제목 텍스트를 시트에서 찾아 그 아래 표준 구조
-    (제목행 → 헤더행(날짜) → 주택용 N_HOUSING행 → 소계 → 기타 N_OTHER행 → 소계 → 합계)
-    를 상대 위치로 인식해 (dates_valid, df[상품 x 연월], error_msg, debug) 를 반환한다.
+    제목 텍스트를 시트에서 찾아 그 아래 표준 구조를 상대 위치로 인식.
+
+    skip_bio=False (KOGAS 등):
+      제목행 → 헤더행(날짜) → 주택용 4행 → 소계 → 기타 9행 → 소계 → 합계
+
+    skip_bio=True (신규방식·이전방식):
+      제목행 → 헤더행(날짜) → 주택용 4행 → 소계
+      → 기타 5행(일반용~수송용) → BIO가스(건너뜀) → 기타 4행(열병합용~주한미군)
+      → 소계 → 합계
+
+    반환: (dates_valid, df[상품 x 연월], error_msg, debug)
     """
     dbg = {}
     title_idx = _find_row_containing(raw, title_variants)
@@ -90,10 +101,21 @@ def _extract_product_table(raw, title_variants, data_start_col=DATA_START_COL):
     header_idx = title_idx + 1
     housing_rows = [header_idx + i for i in range(1, N_HOUSING + 1)]
     subtotal1_row = header_idx + N_HOUSING + 1
-    other_rows = [subtotal1_row + i for i in range(1, N_OTHER + 1)]
+    if skip_bio:
+        # 기타 상품 중 BIO가스 앞 5개 (일반용~수송용)
+        other_before = [subtotal1_row + i for i in range(1, BIO_SKIP_AFTER_N_OTHER + 1)]
+        # BIO가스 행 (건너뜀)
+        bio_row = subtotal1_row + BIO_SKIP_AFTER_N_OTHER + 1
+        # 기타 상품 중 BIO가스 뒤 4개 (열병합용~주한미군)
+        n_after = N_OTHER - BIO_SKIP_AFTER_N_OTHER
+        other_after = [bio_row + i for i in range(1, n_after + 1)]
+        other_rows = other_before + other_after
+    else:
+        other_rows = [subtotal1_row + i for i in range(1, N_OTHER + 1)]
     data_rows = housing_rows + other_rows
     dbg["header_idx"] = header_idx
     dbg["data_rows"] = data_rows
+    dbg["skip_bio"] = skip_bio
     dates = pd.to_datetime(raw.iloc[header_idx, data_start_col:], errors="coerce")
     valid_cols = [i for i, d in enumerate(dates) if pd.notna(d)]
     dates_valid = dates.iloc[valid_cols]
@@ -123,8 +145,9 @@ def load_gsheet_data():
         resp.raise_for_status()
         raw = pd.read_csv(StringIO(resp.text), header=None)
         debug["raw_shape"] = raw.shape
-        # ── [1] 신규방식: "상품별 분배" 표 (D49:ZZ62, 스프레드시트 MJ) ──
-        dates_valid, supply_df, err, sdbg = _extract_product_table(raw, SUPPLY_TABLE_TITLE_VARIANTS)
+        # ── [1] 신규방식: "[new ver] 상품별 분배(MJ)" (BIO가스 행 포함, skip_bio=True) ──
+        dates_valid, supply_df, err, sdbg = _extract_product_table(
+            raw, SUPPLY_TABLE_TITLE_VARIANTS, skip_bio=True)
         debug["supply_table"] = sdbg
         if err:
             return None, None, None, None, None, None, None, err, debug
@@ -147,8 +170,9 @@ def load_gsheet_data():
         ratio_df = ratio_df.fillna(0.0)
         debug["dates_min"] = str(dates_valid.min()) if len(dates_valid) else None
         debug["dates_max"] = str(dates_valid.max()) if len(dates_valid) else None
-        # ── [2] 이전방식: "(last ver) 마케팅팀 상품별 분배" 표 (D94:ZZ107, 스프레드시트 MJ) ──
-        old_dates, old_supply_df, oerr, odbg = _extract_product_table(raw, OLD_TABLE_TITLE_VARIANTS)
+        # ── [2] 이전방식: "[last ver] 상품별 분배(MJ)" (BIO가스 행 포함, skip_bio=True) ──
+        old_dates, old_supply_df, oerr, odbg = _extract_product_table(
+            raw, OLD_TABLE_TITLE_VARIANTS, skip_bio=True)
         debug["old_table"] = odbg
         if oerr or old_supply_df is None:
             debug["old_error"] = oerr
@@ -161,8 +185,9 @@ def load_gsheet_data():
                 old_ratio_df = old_supply_df.div(old_col_sum.replace(0, np.nan), axis=1) * 100
             old_ratio_df = old_ratio_df.fillna(0.0)
             debug["old_nonzero_cols"] = int((old_supply_df.sum(axis=0) > 0).sum())
-        # ── [3] KOGAS 제출: "가스공사 제출용 판매량(MJ)" 표 (D7:ZZ20) ──
-        kogas_dates, kogas_mj_df, kerr, kdbg = _extract_product_table(raw, KOGAS_TABLE_TITLE_VARIANTS)
+        # ── [3] KOGAS 제출: "가스공사 제출용 판매량(MJ)" (BIO가스 행 없음, skip_bio=False) ──
+        kogas_dates, kogas_mj_df, kerr, kdbg = _extract_product_table(
+            raw, KOGAS_TABLE_TITLE_VARIANTS, skip_bio=False)
         debug["kogas_table"] = kdbg
         if kerr or kogas_mj_df is None:
             debug["kogas_error"] = kerr
@@ -433,11 +458,11 @@ st.markdown("""
 <div class="info-box">
   <div class="info-row">
     <div><span class="badge-old">이전방식</span></div>
-    <div>천연가스 공급량(BIO제외) = 상품별 공급량 도출 (스프레드시트 D94:ZZ107)</div>
+    <div>천연가스 공급량(BIO제외) = 상품별 공급량 도출 (스프레드시트 D94:ZZ110)</div>
   </div>
   <div class="info-row">
     <div><span class="badge-new">신규방식</span></div>
-    <div>천연가스 공급량(BIO제외) = 재무팀 상품별 공급량 비율 적용 (스프레드시트 D49:ZZ62)</div>
+    <div>천연가스 공급량(BIO제외) = 재무팀 상품별 공급량 비율 적용 (스프레드시트 D49:ZZ65)</div>
   </div>
   <div class="info-row">
     <div><span class="badge-kogas">KOGAS 제출</span></div>
@@ -510,7 +535,6 @@ if kogas_gj_df is not None and len(kogas_gj_df.columns) > 0:
 else:
     _ALL_KOGAS_COLS = []
     _KOGAS_YEARS = []
-
 def _get_kogas_for_year(yr):
     """선택된 연도의 KOGAS 월 목록, KOGAS_GJ DataFrame, 월별 총량, 비교방식 총량을 반환."""
     months = sorted([c for c in _ALL_KOGAS_COLS if str(c).startswith(str(yr))])
